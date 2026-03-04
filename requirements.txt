@@ -1,0 +1,9 @@
+opencv-python
+mediapipe==0.10.9
+fastapi
+uvicorn
+pydantic
+python-dotenv
+requests
+sqlalchemy
+numpy

@@ -1,0 +1,93 @@
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# ===============================
+# Environment variables
+# ===============================
+.env
+.env.*
+!.env.example
+
+# ===============================
+# Logs
+# ===============================
+logs/
+*.log
+
+# ===============================
+# Database
+# ===============================
+*.db
+*.sqlite
+*.sqlite3
+data/database/
+
+# ===============================
+# Media / Snapshots
+# ===============================
+data/videos/
+data/snapshots/
+
+# Keep folders but ignore contents
+!data/videos/.gitkeep
+!data/snapshots/.gitkeep
+!data/database/.gitkeep
+
+# ===============================
+# Docker
+# ===============================
+docker-compose.override.yml
+*.tar
+
+# ===============================
+# IDE
+# ===============================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ===============================
+# OS files
+# ===============================
+.DS_Store
+Thumbs.db
+
+# ===============================
+# Build / distribution
+# ===============================
+build/
+dist/
+*.egg-info/
+
+# ===============================
+# Testing / coverage
+# ===============================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ===============================
+# Model files (future AI models)
+# ===============================
+models/
+*.pt
+*.onnx
+*.ckpt
+
+# ===============================
+# Temporary files
+# ===============================
+tmp/
+temp/
+*.tmp
