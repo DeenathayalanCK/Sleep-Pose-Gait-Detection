@@ -1,24 +1,52 @@
 import time
-from app.config import FATIGUE_SECONDS
+import logging
+from app.detection.sleep_pose_detector import SleepAnalysis
+
+logger = logging.getLogger(__name__)
+
 
 class FatigueEngine:
+    """
+    Tracks how long the person has been in 'sleeping' state continuously.
+    Fires an alert when they cross the threshold.
+
+    Also debounces alerts — once fired, waits COOLDOWN_SECONDS before
+    firing again for the same sleep episode.
+    """
+    COOLDOWN_SECONDS = 30.0   # don't spam alerts for the same sleep episode
 
     def __init__(self):
-        self.start_closed = None
+        self._sleep_start:   float | None = None
+        self._last_alert_at: float | None = None
 
-    def update(self, closed):
+    def update(self, analysis: SleepAnalysis) -> tuple[bool, float]:
+        """
+        Returns (should_alert, sleep_duration_seconds).
+        should_alert is True only on the leading edge of a threshold crossing,
+        and respects the cooldown.
+        """
+        now = time.monotonic()
 
-        if closed:
+        if analysis.state == "sleeping":
+            if self._sleep_start is None:
+                self._sleep_start = now
+                logger.debug("Sleep episode started")
 
-            if self.start_closed is None:
-                self.start_closed = time.time()
+            duration = now - self._sleep_start
 
-            duration = time.time() - self.start_closed
+            # Check cooldown to avoid duplicate alerts
+            in_cooldown = (
+                self._last_alert_at is not None
+                and (now - self._last_alert_at) < self.COOLDOWN_SECONDS
+            )
 
-            if duration > FATIGUE_SECONDS:
-                return True, duration
+            if not in_cooldown:
+                self._last_alert_at = now
+                return True, round(duration, 1)
 
         else:
-            self.start_closed = None
+            if self._sleep_start is not None:
+                logger.info(f"Sleep episode ended after {now - self._sleep_start:.1f}s")
+            self._sleep_start = None
 
-        return False, 0
+        return False, 0.0

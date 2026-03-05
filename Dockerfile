@@ -2,6 +2,9 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# Disable MediaPipe GPU/EGL — container has no display server
+ENV MEDIAPIPE_DISABLE_GPU=1
+
 # Install system dependencies required by OpenCV
 RUN apt-get update && apt-get install -y \
     libgl1 \
