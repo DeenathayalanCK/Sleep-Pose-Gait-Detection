@@ -2,23 +2,32 @@ from sqlalchemy import Column, Integer, Float, Text
 from app.database.db import Base
 
 
-# BUG FIX: models.py was completely empty — no table definition existed.
-# repository.py was manually running CREATE TABLE each insert (fragile) and
-# using raw SQL while the rest of the app expected ORM.
-class FatigueEvent(Base):
-    __tablename__ = "fatigue_events"
+class SleepEvent(Base):
+    __tablename__ = "sleep_events"
 
-    id        = Column(Integer, primary_key=True, autoincrement=True)
-    timestamp = Column(Text, nullable=False)
-    duration  = Column(Float, nullable=False)
-    snapshot  = Column(Text, nullable=True)
-    summary   = Column(Text, nullable=True)
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    camera_id        = Column(Text,    nullable=False)
+    started_at       = Column(Text,    nullable=False)   # ISO timestamp
+    ended_at         = Column(Text,    nullable=True)    # filled on episode end
+    duration         = Column(Float,   nullable=False)
+    trigger          = Column(Text,    nullable=True)    # "inactivity" | "recline"
+    reclined_ratio   = Column(Float,   nullable=True)
+    inactive_seconds = Column(Float,   nullable=True)
+    confidence       = Column(Float,   nullable=True)
+    snapshot         = Column(Text,    nullable=True)    # path to keyframe
+    summary          = Column(Text,    nullable=True)    # LLM summary
 
     def to_dict(self):
         return {
-            "id":        self.id,
-            "timestamp": self.timestamp,
-            "duration":  self.duration,
-            "snapshot":  self.snapshot,
-            "summary":   self.summary,
+            "id":               self.id,
+            "camera_id":        self.camera_id,
+            "started_at":       self.started_at,
+            "ended_at":         self.ended_at,
+            "duration":         self.duration,
+            "trigger":          self.trigger,
+            "reclined_ratio":   self.reclined_ratio,
+            "inactive_seconds": self.inactive_seconds,
+            "confidence":       self.confidence,
+            "snapshot":         self.snapshot,
+            "summary":          self.summary,
         }

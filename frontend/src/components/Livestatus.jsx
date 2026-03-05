@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { getStatus } from "../api";
 
-const STATE_COLORS = {
-  sleeping: { bg: "#1a0000", accent: "#ff2020", label: "SLEEPING" },
-  drowsy: { bg: "#1a0e00", accent: "#ff8c00", label: "DROWSY" },
-  inactive: { bg: "#0e0e1a", accent: "#7b68ee", label: "INACTIVE" },
-  awake: { bg: "#001a08", accent: "#00e676", label: "AWAKE" },
-  no_person: { bg: "#111", accent: "#555", label: "NO PERSON" },
-  unknown: { bg: "#111", accent: "#555", label: "—" },
-  starting: { bg: "#111", accent: "#555", label: "STARTING" },
+const STATE_CFG = {
+  sleeping: { bg: "#1a0000", accent: "#ff2020", icon: "😴", label: "SLEEPING" },
+  drowsy: { bg: "#1a0e00", accent: "#ff8c00", icon: "😪", label: "DROWSY" },
+  inactive: { bg: "#0e0e1a", accent: "#7b68ee", icon: "💤", label: "INACTIVE" },
+  sitting: { bg: "#001020", accent: "#00bcd4", icon: "🪑", label: "SITTING" },
+  standing: { bg: "#001a08", accent: "#00e676", icon: "🧍", label: "STANDING" },
+  walking: { bg: "#001a08", accent: "#69f0ae", icon: "🚶", label: "WALKING" },
+  awake: { bg: "#001a08", accent: "#00e676", icon: "👁️", label: "AWAKE" },
+  no_person: { bg: "#111", accent: "#444", icon: "👻", label: "NO PERSON" },
+  unknown: { bg: "#111", accent: "#333", icon: "—", label: "—" },
+  starting: { bg: "#111", accent: "#333", icon: "⏳", label: "STARTING" },
 };
 
 function Gauge({ label, value, max, unit, accent }) {
@@ -19,31 +22,51 @@ function Gauge({ label, value, max, unit, accent }) {
         style={{
           display: "flex",
           justifyContent: "space-between",
-          fontSize: 11,
+          fontSize: 10,
           letterSpacing: 2,
-          color: "#888",
+          color: "#555",
           marginBottom: 5,
           textTransform: "uppercase",
         }}
       >
         <span>{label}</span>
         <span style={{ color: accent }}>
-          {value}
+          {typeof value === "number" ? value.toFixed(1) : value}
           {unit}
         </span>
       </div>
-      <div style={{ height: 4, background: "#222", borderRadius: 2 }}>
+      <div style={{ height: 3, background: "#1e1e1e", borderRadius: 2 }}>
         <div
           style={{
             height: "100%",
             width: `${pct}%`,
             background: accent,
             borderRadius: 2,
-            transition: "width 0.4s ease",
+            transition: "width 0.5s ease",
           }}
         />
       </div>
     </div>
+  );
+}
+
+function Pill({ label, on, accent }) {
+  return (
+    <span
+      style={{
+        fontSize: 10,
+        letterSpacing: 2,
+        padding: "3px 9px",
+        borderRadius: 20,
+        fontFamily: "monospace",
+        textTransform: "uppercase",
+        background: on ? `${accent}22` : "#111",
+        color: on ? accent : "#333",
+        border: `1px solid ${on ? accent + "55" : "#222"}`,
+      }}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -64,55 +87,55 @@ export default function LiveStatus() {
     return () => clearInterval(iv);
   }, []);
 
-  const theme = STATE_COLORS[s?.state] ?? STATE_COLORS.unknown;
+  const cfg = STATE_CFG[s?.state] ?? STATE_CFG.unknown;
 
   return (
     <div
       style={{
-        background: theme.bg,
-        border: `1px solid ${theme.accent}33`,
+        background: cfg.bg,
+        border: `1px solid ${cfg.accent}33`,
         borderRadius: 12,
-        padding: "28px 32px",
-        marginBottom: 32,
-        transition: "background 0.6s ease",
-        boxShadow: `0 0 40px ${theme.accent}18`,
+        padding: "24px 28px",
+        transition: "background 0.5s ease, border-color 0.5s ease",
+        boxShadow: `0 0 32px ${cfg.accent}14`,
       }}
     >
-      {/* Header */}
+      {/* State header */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 14,
+          gap: 12,
           marginBottom: 24,
         }}
       >
         <div
           style={{
-            width: 14,
-            height: 14,
+            width: 12,
+            height: 12,
             borderRadius: "50%",
-            background: theme.accent,
-            boxShadow: `0 0 12px ${theme.accent}`,
+            background: cfg.accent,
+            boxShadow: `0 0 10px ${cfg.accent}`,
+            flexShrink: 0,
             animation: s?.state === "sleeping" ? "pulse 1.2s infinite" : "none",
           }}
         />
         <span
           style={{
-            fontSize: 22,
+            fontSize: 18,
             fontWeight: 700,
             letterSpacing: 4,
-            color: theme.accent,
+            color: cfg.accent,
             fontFamily: "monospace",
           }}
         >
-          {theme.label}
+          {cfg.icon} {cfg.label}
         </span>
         <span
           style={{
             marginLeft: "auto",
-            fontSize: 11,
-            color: "#555",
+            fontSize: 10,
+            color: "#333",
             fontFamily: "monospace",
           }}
         >
@@ -121,7 +144,7 @@ export default function LiveStatus() {
       </div>
 
       {error && (
-        <p style={{ color: "#ff4444", fontSize: 12, marginBottom: 16 }}>
+        <p style={{ color: "#ff4444", fontSize: 11, marginBottom: 12 }}>
           ⚠ {error}
         </p>
       )}
@@ -133,32 +156,39 @@ export default function LiveStatus() {
             value={s.inactive_seconds}
             max={30}
             unit="s"
-            accent={theme.accent}
+            accent={cfg.accent}
           />
           <Gauge
             label="Reclined"
             value={Math.round(s.reclined_ratio * 100)}
             max={100}
             unit="%"
-            accent={theme.accent}
+            accent={cfg.accent}
           />
           <Gauge
             label="Motion"
             value={s.motion_score}
             max={10}
             unit=""
-            accent={theme.accent}
+            accent={cfg.accent}
           />
           <Gauge
             label="Confidence"
             value={Math.round(s.confidence * 100)}
             max={100}
             unit="%"
-            accent={theme.accent}
+            accent={cfg.accent}
           />
 
-          <div style={{ display: "flex", gap: 24, marginTop: 20 }}>
-            <Pill label="Pose" on={s.pose_visible} accent={theme.accent} />
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              marginTop: 18,
+              flexWrap: "wrap",
+            }}
+          >
+            <Pill label="Pose" on={s.pose_visible} accent={cfg.accent} />
             {s.ear !== null && (
               <Pill label={`EAR ${s.ear}`} on={s.ear < 0.25} accent="#ff8c00" />
             )}
@@ -167,31 +197,8 @@ export default function LiveStatus() {
       )}
 
       <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.3; }
-        }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
       `}</style>
     </div>
-  );
-}
-
-function Pill({ label, on, accent }) {
-  return (
-    <span
-      style={{
-        fontSize: 11,
-        letterSpacing: 2,
-        padding: "4px 10px",
-        borderRadius: 20,
-        fontFamily: "monospace",
-        textTransform: "uppercase",
-        background: on ? `${accent}22` : "#1a1a1a",
-        color: on ? accent : "#444",
-        border: `1px solid ${on ? accent + "44" : "#333"}`,
-      }}
-    >
-      {label}
-    </span>
   );
 }

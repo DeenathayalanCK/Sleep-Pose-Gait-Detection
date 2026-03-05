@@ -3,32 +3,63 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def _float(key, default): return float(os.getenv(key, default))
+def _int(key, default):   return int(os.getenv(key, default))
+def _str(key, default):   return os.getenv(key, default)
 
-def _get(key, default=None, cast=str):
-    val = os.getenv(key, default)
-    if val is None:
-        raise EnvironmentError(f"Required env variable '{key}' is not set.")
-    return cast(val)
+# ── Camera / video ─────────────────────────────────────────────────────────────
+VIDEO_SOURCE  = _str("VIDEO_SOURCE", "data/videos/test.mp4")
+CAMERA_ID     = _str("CAMERA_ID",    "camera_1")
+FRAME_WIDTH   = _int("FRAME_WIDTH",  "640")
+FRAME_HEIGHT  = _int("FRAME_HEIGHT", "480")
 
+# ── Storage ────────────────────────────────────────────────────────────────────
+DATABASE_PATH = _str("DATABASE_PATH", "data/database/events.db")
+SNAPSHOT_DIR  = _str("SNAPSHOT_DIR",  "data/snapshots")
 
-# Camera / video
-VIDEO_SOURCE     = os.getenv("VIDEO_SOURCE", "data/videos/test.mp4")
-CAMERA_ID        = os.getenv("CAMERA_ID", "camera_1")
+# ── LLM ───────────────────────────────────────────────────────────────────────
+OLLAMA_HOST  = _str("OLLAMA_HOST",  "http://localhost:11434")
+OLLAMA_MODEL = _str("OLLAMA_MODEL", "llama3:8b")
 
-# Detection thresholds
-# BUG FIX: original code did float(os.getenv(...)) with no default — crashes
-# with TypeError when variable is missing from .env
-EAR_THRESHOLD    = float(os.getenv("EAR_THRESHOLD", "0.25"))
-FATIGUE_SECONDS  = int(os.getenv("FATIGUE_SECONDS", "5"))
+# ── Eye / EAR (secondary signal — only when frontal face visible) ──────────────
+EAR_THRESHOLD = _float("EAR_THRESHOLD", "0.25")
 
-# Frame dimensions
-FRAME_WIDTH      = int(os.getenv("FRAME_WIDTH", "640"))
-FRAME_HEIGHT     = int(os.getenv("FRAME_HEIGHT", "480"))
+# ── Sleep / inactivity thresholds ─────────────────────────────────────────────
+# How many seconds of zero motion before declaring SLEEPING.
+# Primary signal — works for ANY posture (reclined, head-on-desk, slumped).
+SLEEP_SECONDS  = _float("SLEEP_SECONDS",  "10.0")
 
-# Storage
-DATABASE_PATH    = os.getenv("DATABASE_PATH", "data/database/events.db")
-SNAPSHOT_DIR     = os.getenv("SNAPSHOT_DIR", "data/snapshots")
+# How many seconds of low motion before declaring DROWSY.
+DROWSY_SECONDS = _float("DROWSY_SECONDS", "5.0")
 
-# LLM (optional — features degrade gracefully if not set)
-OLLAMA_HOST      = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL     = os.getenv("OLLAMA_MODEL", "llama3:8b")
+# If reclined AND inactive >= this (shorter) time → also sleeping.
+# Lets the system react faster when body posture is clearly reclined.
+SLEEP_SECONDS_RECLINED = _float("SLEEP_SECONDS_RECLINED", "7.0")
+
+# Recline ratio at which the body is considered "clearly reclined" (0–1).
+# 0.60 = body X-span is 60% of total span — works for chair-reclined posture.
+# Raise if false positives; lower if reclined posture misses.
+RECLINE_THRESHOLD = _float("RECLINE_THRESHOLD", "0.60")
+
+# Recline ratio below which recline signal is ignored entirely.
+RECLINE_MIN = _float("RECLINE_MIN", "0.50")
+
+# ── Motion sensitivity ─────────────────────────────────────────────────────────
+# Mean per-pixel intensity change below which frame is considered "no motion".
+# Lower = more sensitive (picks up tiny movements).
+# Raise for busy/noisy backgrounds; lower for static scenes.
+MOTION_THRESHOLD = _float("MOTION_THRESHOLD", "1.2")
+
+# ── Alert cooldown ─────────────────────────────────────────────────────────────
+# Seconds to wait before re-alerting for the same continuous sleep episode.
+ALERT_COOLDOWN_SECONDS = _float("ALERT_COOLDOWN_SECONDS", "30.0")
+
+# ── MediaPipe pose confidence ──────────────────────────────────────────────────
+# Lower for distant/angled cameras; raise for close/frontal cameras.
+POSE_DETECTION_CONFIDENCE  = _float("POSE_DETECTION_CONFIDENCE",  "0.45")
+POSE_TRACKING_CONFIDENCE   = _float("POSE_TRACKING_CONFIDENCE",   "0.45")
+POSE_LANDMARK_MIN_VISIBILITY = _float("POSE_LANDMARK_MIN_VISIBILITY", "0.35")
+
+# ── Smoothing ──────────────────────────────────────────────────────────────────
+# Number of frames to average recline ratio over (reduces flicker).
+RECLINE_SMOOTH_FRAMES = _int("RECLINE_SMOOTH_FRAMES", "8")

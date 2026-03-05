@@ -14,3 +14,8 @@ services:
     image: ollama/ollama
     ports:
       - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama # persist models across restarts
+
+volumes:
+  ollama_models:
