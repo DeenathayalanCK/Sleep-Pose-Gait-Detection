@@ -1,46 +1,40 @@
 import asyncio
-import logging
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from app.database.repository import get_all_events
+from app.database.repository import get_all_events, get_all_persons
 from app.camera.stream_frame import latest_frame
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/events")
-def get_events():
+@router.get("/events")          # kept for backward compat
+@router.get("/fatigue-events")
+def get_fatigue_events():
     return [e.to_dict() for e in get_all_events()]
+
+
+@router.get("/persons")
+def get_persons():
+    return [p.to_dict() for p in get_all_persons()]
 
 
 @router.get("/status")
 def get_status():
-    from app.main import current_status
-    return current_status
+    from app.main import current_persons
+    return current_persons
 
 
 @router.get("/stream")
 async def video_stream():
-    """
-    MJPEG stream endpoint.
-    The browser <img src="/stream"> connects once and receives a continuous
-    multipart/x-mixed-replace stream of JPEG frames.
-    """
-    async def frame_generator():
+    async def gen():
         while True:
             jpeg = latest_frame.read()
             if jpeg:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n"
-                    + jpeg +
-                    b"\r\n"
-                )
-            await asyncio.sleep(0.04)   # ~25 fps cap
-
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                       + jpeg + b"\r\n")
+            await asyncio.sleep(0.04)
     return StreamingResponse(
-        frame_generator(),
+        gen(),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-cache"},
     )

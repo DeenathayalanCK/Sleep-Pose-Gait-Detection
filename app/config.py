@@ -63,3 +63,25 @@ POSE_LANDMARK_MIN_VISIBILITY = _float("POSE_LANDMARK_MIN_VISIBILITY", "0.35")
 # ── Smoothing ──────────────────────────────────────────────────────────────────
 # Number of frames to average recline ratio over (reduces flicker).
 RECLINE_SMOOTH_FRAMES = _int("RECLINE_SMOOTH_FRAMES", "8")
+
+# ── Multi-person tracking (YOLO + ByteTrack) ───────────────────────────────────
+# Max persons to run full MediaPipe skeleton on per frame.
+# Sorted by bounding-box area (largest = nearest). Rest get bbox+state only.
+MAX_POSE_PERSONS = _int("MAX_POSE_PERSONS", "6")
+
+# Seconds a track can be absent before its state/history is discarded.
+TRACK_TIMEOUT_SECONDS = _float("TRACK_TIMEOUT_SECONDS", "30.0")
+
+# Seconds to remember a person's cumulative session for re-entry matching.
+TRACK_REENTRY_SECONDS = _float("TRACK_REENTRY_SECONDS", "120.0")
+
+# YOLO model — yolov8n.pt (nano, CPU-friendly) downloads automatically.
+# Override with yolov8s.pt / yolov8m.pt for better accuracy at cost of speed.
+YOLO_MODEL       = _str("YOLO_MODEL",       "yolov8n.pt")
+YOLO_CONF        = _float("YOLO_CONF",       "0.35")
+YOLO_IOU         = _float("YOLO_IOU",        "0.45")
+
+# Posture thresholds (all camera-agnostic ratios)
+POSTURE_WALK_MOTION_THRESHOLD = _float("POSTURE_WALK_MOTION_THRESHOLD", "5.0")
+POSTURE_SIT_Y_RATIO           = _float("POSTURE_SIT_Y_RATIO",           "0.20")
+POSTURE_STAND_Y_RATIO         = _float("POSTURE_STAND_Y_RATIO",         "0.12")

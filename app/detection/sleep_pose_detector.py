@@ -6,7 +6,6 @@ import logging
 import numpy as np
 import mediapipe as mp
 from dataclasses import dataclass, field
-from typing import Optional
 
 from app.config import (
     MOTION_THRESHOLD, SLEEP_SECONDS, DROWSY_SECONDS,
@@ -24,19 +23,19 @@ _L_ANKLE=27; _R_ANKLE=28; _L_WRIST=15; _R_WRIST=16
 
 @dataclass
 class SleepAnalysis:
-    state: str = "unknown"
-    confidence: float = 0.0
+    state:            str   = "unknown"
+    confidence:       float = 0.0
     inactive_seconds: float = 0.0
-    reclined_ratio: float = 0.0
-    motion_score: float = 0.0
-    pose_visible: bool = False
-    pose_landmarks: object = None    # raw MediaPipe landmarks — for drawing
-    debug: dict = field(default_factory=dict)
+    reclined_ratio:   float = 0.0
+    motion_score:     float = 0.0
+    pose_visible:     bool  = False
+    pose_landmarks:   object = None
+    debug:            dict  = field(default_factory=dict)
 
 
 class MotionDetector:
     def __init__(self, history=6):
-        self._frames = []
+        self._frames  = []
         self._history = history
 
     def update(self, gray: np.ndarray) -> float:
@@ -72,16 +71,18 @@ def _lm(landmarks, idx, w, h):
 
 def compute_recline_ratio(landmarks, w, h):
     pts = []
-    for idx in [_NOSE,_L_SHOULDER,_R_SHOULDER,_L_HIP,_R_HIP,
-                _L_KNEE,_R_KNEE,_L_ANKLE,_R_ANKLE]:
+    for idx in [_NOSE, _L_SHOULDER, _R_SHOULDER, _L_HIP, _R_HIP,
+                _L_KNEE, _R_KNEE, _L_ANKLE, _R_ANKLE]:
         p = _lm(landmarks, idx, w, h)
         if p:
             pts.append(p)
     if len(pts) < 4:
         return None
-    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
-    x_span = max(xs)-min(xs); y_span = max(ys)-min(ys)
-    total = x_span + y_span
+    xs     = [p[0] for p in pts]
+    ys     = [p[1] for p in pts]
+    x_span = max(xs) - min(xs)
+    y_span = max(ys) - min(ys)
+    total  = x_span + y_span
     return float(x_span / total) if total > 10 else None
 
 
@@ -90,11 +91,17 @@ class SleepPoseDetector:
     Camera-agnostic sleep detector. All thresholds from config/env.
 
     Detection paths:
-      PRIMARY  — inactive >= SLEEP_SECONDS                  → sleeping
-      BOOSTER  — recline >= RECLINE_THRESHOLD
-                 AND inactive >= SLEEP_SECONDS_RECLINED     → sleeping (faster)
-      DROWSY   — inactive >= DROWSY_SECONDS
-                 OR recline >= RECLINE_MIN                  → drowsy
+      SLEEPING  — inactive >= SLEEP_SECONDS                         (primary)
+      SLEEPING  — recline >= RECLINE_THRESHOLD
+                  AND inactive >= SLEEP_SECONDS_RECLINED            (posture boost)
+      DROWSY    — inactive >= DROWSY_SECONDS
+                  AND recline >= RECLINE_MIN                        (both required)
+                  OR  inactive >= DROWSY_SECONDS * 1.5              (long inactivity alone)
+
+    KEY FIX: recline alone no longer triggers drowsy.
+    Both inactivity AND recline must be present together.
+    This prevents people leaning forward (typing, reading) from being
+    falsely flagged as drowsy.
     """
 
     def __init__(self):
@@ -104,17 +111,17 @@ class SleepPoseDetector:
             min_detection_confidence=POSE_DETECTION_CONFIDENCE,
             min_tracking_confidence=POSE_TRACKING_CONFIDENCE,
         )
-        self._motion     = MotionDetector()
-        self._inactivity = InactivityTimer()
-        self._last_pose_time = time.monotonic()
+        self._motion           = MotionDetector()
+        self._inactivity       = InactivityTimer()
+        self._last_pose_time   = time.monotonic()
         self._recline_history: list[float] = []
 
     def process(self, bgr_frame: np.ndarray) -> SleepAnalysis:
         import cv2
         h, w = bgr_frame.shape[:2]
 
-        gray   = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-        motion = self._motion.update(gray)
+        gray         = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
+        motion       = self._motion.update(gray)
         inactive_secs = self._inactivity.update(motion)
 
         rgb    = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
@@ -128,7 +135,6 @@ class SleepPoseDetector:
                 inactive_seconds=round(inactive_secs, 1),
                 motion_score=round(motion, 2),
                 pose_visible=False,
-                pose_landmarks=None,
                 debug={"pose": "none", "gap_s": round(gap, 1)},
             )
 
@@ -149,7 +155,22 @@ class SleepPoseDetector:
         sleeping_by_recline    = clearly_reclined and inactive_secs >= SLEEP_SECONDS_RECLINED
         sleeping = sleeping_by_inactivity or sleeping_by_recline
 
-        drowsy = not sleeping and (inactive_secs >= DROWSY_SECONDS or somewhat_reclined)
+        # ── FIXED DROWSY LOGIC ───────────────────────────────────────────
+        # Old: inactive >= DROWSY_SECONDS OR recline >= RECLINE_MIN
+        #      ↑ recline alone caused false positives for laptop users
+        #
+        # New: (inactive >= DROWSY_SECONDS AND recline present)
+        #      OR inactive >= DROWSY_SECONDS * 1.5   (extended stillness alone)
+        #
+        # Person typing on laptop:  recline=0.40, inactive=2s  → NOT drowsy ✓
+        # Person drowsy at desk:    recline=0.42, inactive=9s  → DROWSY ✓
+        # Person completely still:  recline=0.20, inactive=12s → DROWSY ✓
+        drowsy = (
+            not sleeping and (
+                (inactive_secs >= DROWSY_SECONDS and somewhat_reclined)
+                or inactive_secs >= DROWSY_SECONDS * 1.5
+            )
+        )
 
         if sleeping:
             state      = "sleeping"
@@ -173,7 +194,7 @@ class SleepPoseDetector:
             reclined_ratio=round(smooth_recline, 3),
             motion_score=round(motion, 2),
             pose_visible=True,
-            pose_landmarks=lms,    # pass through for drawing — no re-processing
+            pose_landmarks=lms,
             debug={
                 "raw_recline":      round(recline, 3) if recline else None,
                 "smooth_recline":   round(smooth_recline, 3),
