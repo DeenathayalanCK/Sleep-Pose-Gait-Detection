@@ -1,61 +1,56 @@
-import LiveStatus from "./components/Livestatus";
-import LiveStream from "./components/Livestream";
+import LiveStream from "./components/LiveStream";
+import LiveStatus from "./components/LiveStatus";
+import PersonList from "./components/Personlist";
 import Events from "./components/Events";
 
 export default function App() {
   return (
     <div
       style={{
+        background: "#050505",
         minHeight: "100vh",
-        background: "#0a0a0a",
-        color: "#ccc",
+        color: "#eee",
         fontFamily: "'Courier New', monospace",
-        padding: "36px 48px",
-        maxWidth: 960,
-        margin: "0 auto",
+        padding: "24px 32px",
       }}
     >
-      {/* Title */}
-      <div style={{ marginBottom: 32 }}>
-        <div
-          style={{
-            fontSize: 10,
-            letterSpacing: 6,
-            color: "#333",
-            textTransform: "uppercase",
-            marginBottom: 6,
-          }}
-        >
-          Sleep Detection System
-        </div>
-        <h1
-          style={{
-            fontSize: 26,
-            fontWeight: 700,
-            color: "#fff",
-            letterSpacing: 2,
-            margin: 0,
-          }}
-        >
-          CCTV Monitor
-        </h1>
-      </div>
-
-      {/* Two-column: stream left, status right */}
+      {/* Top row: stream + live status */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 320px",
+          gridTemplateColumns: "1fr 340px",
           gap: 24,
           marginBottom: 32,
-          alignItems: "start",
         }}
       >
         <LiveStream />
         <LiveStatus />
       </div>
 
-      <Events />
+      {/* Middle row: person sessions table */}
+      <div
+        style={{
+          background: "#0a0a0a",
+          border: "1px solid #1a1a1a",
+          borderRadius: 12,
+          padding: "20px 24px",
+          marginBottom: 32,
+        }}
+      >
+        <PersonList />
+      </div>
+
+      {/* Bottom: sleep events */}
+      <div
+        style={{
+          background: "#0a0a0a",
+          border: "1px solid #1a1a1a",
+          borderRadius: 12,
+          padding: "20px 24px",
+        }}
+      >
+        <Events />
+      </div>
     </div>
   );
 }

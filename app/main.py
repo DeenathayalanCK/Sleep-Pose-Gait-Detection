@@ -11,43 +11,29 @@ from threading import Thread
 from app.utils.logger import setup_logger
 from app.database.db import init_db
 from app.api.server import create_app
-from app.config import FRAME_WIDTH, FRAME_HEIGHT, SLEEP_SECONDS
+from app.config import FRAME_WIDTH, FRAME_HEIGHT, CAMERA_ID
 
 from app.camera.video_reader import VideoReader
 from app.camera.stream_frame import latest_frame
-from app.detection.sleep_pose_detector import SleepPoseDetector
-from app.detection.face_mesh import FaceMeshDetector
-from app.detection.eye_landmarks import extract_eye_landmarks
-from app.detection.fatigue_detector import FatigueDetector
-from app.engine.fatigue_engine import FatigueEngine
-from app.engine.state_analyzer import StateAnalyzer
-from app.utils.annotator import draw_overlay
+from app.tracking.person_tracker import PersonTracker
+from app.tracking.track_manager import TrackManager
+from app.utils.annotator import draw_person, draw_global_overlay
 
 setup_logger()
 logger = logging.getLogger(__name__)
 
-current_status: dict = {
-    "state":            "starting",
-    "confidence":       0.0,
-    "inactive_seconds": 0.0,
-    "reclined_ratio":   0.0,
-    "motion_score":     0.0,
-    "pose_visible":     False,
-    "posture":          "unknown",
-    "ear":              None,
-    "updated_at":       None,
-}
+# Global status — list of per-person dicts for /status endpoint
+current_persons: dict = {}   # track_id → status dict
 
 
 def monitor():
-    logger.info("Fatigue monitoring started.")
+    logger.info("Multi-person monitoring started.")
 
-    video          = VideoReader()
-    sleep_detector = SleepPoseDetector()
-    mesh           = FaceMeshDetector()
-    eye_detector   = FatigueDetector()
-    engine         = FatigueEngine()
-    state_analyzer = StateAnalyzer()
+    video        = VideoReader()
+    tracker      = PersonTracker()
+    track_mgr    = TrackManager()
+
+    frame_time   = time.monotonic()
 
     while True:
         try:
@@ -56,55 +42,62 @@ def monitor():
                 time.sleep(0.03)
                 continue
 
+            now = time.monotonic()
+            dt  = now - frame_time
+            frame_time = now
+
             frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-            fh, fw = frame.shape[:2]
 
-            # Primary: pose-based detection — landmarks carried in analysis
-            analysis = sleep_detector.process(frame)
+            # ── Detect + track all persons ────────────────────────────────
+            persons = tracker.update(frame)
 
-            # Secondary: EAR when frontal face visible
-            ear  = None
-            rgb  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            face = mesh.detect(rgb)
-            if face is not None:
-                left_eye, right_eye = extract_eye_landmarks(face, fw, fh)
-                eye_closed, ear = eye_detector.check(left_eye, right_eye)
-                if eye_closed and analysis.state != "sleeping":
-                    analysis.state = "drowsy"
+            # ── Per-person pose + state + event management ────────────────
+            annotated = frame.copy()
 
-            inactive = analysis.inactive_seconds > SLEEP_SECONDS
-            # Pass landmarks + motion to state_analyzer for posture classification
-            state = state_analyzer.analyze(
-                pose_state    = analysis.state,
-                inactive      = inactive,
-                pose_landmarks= analysis.pose_landmarks,
-                frame_h       = fh,
-                frame_w       = fw,
-                motion_score  = analysis.motion_score,
+            # First pass: draw global header
+            # (person_states not yet populated — draw after second pass)
+
+            # Build partial annotated with per-person drawings
+            person_states = track_mgr.update(
+                persons, frame, annotated_frame=annotated
             )
 
-            current_status.update({
-                "state":            state,
-                "confidence":       analysis.confidence,
-                "inactive_seconds": analysis.inactive_seconds,
-                "reclined_ratio":   analysis.reclined_ratio,
-                "motion_score":     analysis.motion_score,
-                "pose_visible":     analysis.pose_visible,
-                "posture":          state,
-                "ear":              round(ear, 3) if ear else None,
-                "updated_at":       datetime.datetime.now().isoformat(),
-            })
+            # Draw per-person boxes + skeletons + labels
+            # We need bbox from the tracker result — build a lookup
+            bbox_by_id = {p.track_id: p for p in persons}
+            for tid, ps in person_states.items():
+                p = bbox_by_id.get(tid)
+                if p:
+                    draw_person(
+                        annotated,
+                        track_id=tid,
+                        x1=p.x1, y1=p.y1, x2=p.x2, y2=p.y2,
+                        state=ps.state,
+                        analysis=ps.analysis,
+                        pose_landmarks=ps.analysis.pose_landmarks,
+                    )
 
-            # Annotate frame with skeleton, bounding box, state banner
-            annotated = draw_overlay(
-                frame, analysis, state, ear, analysis.pose_landmarks
-            )
+            # Draw global header bar
+            draw_global_overlay(annotated, person_states, CAMERA_ID)
+
+            # ── Update global status dict ─────────────────────────────────
+            current_persons.clear()
+            for tid, ps in person_states.items():
+                current_persons[str(tid)] = {
+                    "track_id":        tid,
+                    "state":           ps.state,
+                    "confidence":      ps.analysis.confidence,
+                    "inactive_seconds":ps.analysis.inactive_seconds,
+                    "reclined_ratio":  ps.analysis.reclined_ratio,
+                    "motion_score":    ps.analysis.motion_score,
+                    "pose_visible":    ps.analysis.pose_visible,
+                    "updated_at":      datetime.datetime.now().isoformat(),
+                }
+
+            # ── Push annotated frame to MJPEG stream ──────────────────────
             _, jpeg = cv2.imencode(".jpg", annotated,
                                    [cv2.IMWRITE_JPEG_QUALITY, 72])
             latest_frame.write(jpeg.tobytes())
-
-            # Save event + snapshot — all handled inside engine (non-blocking)
-            engine.update(analysis, snapshot_frame=annotated)
 
         except Exception as e:
             logger.error(f"Monitoring error: {e}", exc_info=True)

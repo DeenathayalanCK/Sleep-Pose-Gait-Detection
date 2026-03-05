@@ -20,6 +20,6 @@ class Base(DeclarativeBase):
 
 
 def init_db():
-    from app.database.models import SleepEvent  # noqa
+    from app.database.models import FatigueEvent  # noqa
     Base.metadata.create_all(bind=engine)
     logger.info("Database initialised.")

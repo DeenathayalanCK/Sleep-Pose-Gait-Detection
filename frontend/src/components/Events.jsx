@@ -1,14 +1,79 @@
 import { useEffect, useState } from "react";
-import { getEvents } from "../api";
+import axios from "axios";
 
-function snapshotUrl(path) {
+const API = "http://localhost:8000";
+
+function imgUrl(path) {
   if (!path) return null;
-  return `http://localhost:8000/snapshots/${path.split("/").pop()}`;
+  return `${API}/snapshots/${path.split(/[\\/]/).pop()}`;
 }
 
 function fmt(iso) {
-  if (!iso) return "—";
-  return iso.replace("T", " ").slice(0, 19);
+  return iso ? iso.replace("T", " ").slice(0, 19) : "—";
+}
+
+// Visual config per fatigue type
+const TYPE_CFG = {
+  sleeping: {
+    accent: "#ff2020",
+    label: "SLEEPING",
+    icon: "😴",
+    border: "#ff202044",
+  },
+  drowsy: {
+    accent: "#ff8c00",
+    label: "DROWSY",
+    icon: "😪",
+    border: "#ff8c0044",
+  },
+};
+
+function TypeBadge({ type }) {
+  const cfg = TYPE_CFG[type] ?? TYPE_CFG.sleeping;
+  return (
+    <span
+      style={{
+        background: cfg.accent + "22",
+        border: `1px solid ${cfg.accent}66`,
+        borderRadius: 5,
+        padding: "3px 10px",
+        fontSize: 10,
+        fontFamily: "monospace",
+        color: cfg.accent,
+        fontWeight: 700,
+        letterSpacing: 2,
+      }}
+    >
+      {cfg.icon} {cfg.label}
+    </span>
+  );
+}
+
+function CauseBanner({ cause }) {
+  if (!cause) return null;
+  return (
+    <div
+      style={{
+        background: "#0f0a00",
+        border: "1px solid #ff8c0022",
+        borderLeft: "3px solid #ff8c00",
+        borderRadius: 6,
+        padding: "7px 12px",
+        marginBottom: 10,
+        fontSize: 11,
+        color: "#cc8800",
+        fontFamily: "monospace",
+        lineHeight: 1.5,
+      }}
+    >
+      <span
+        style={{ color: "#555", marginRight: 8, fontSize: 9, letterSpacing: 2 }}
+      >
+        WHY
+      </span>
+      {cause}
+    </div>
+  );
 }
 
 function Badge({ label, value, accent }) {
@@ -18,8 +83,8 @@ function Badge({ label, value, accent }) {
         background: "#111",
         border: `1px solid ${accent}33`,
         borderRadius: 6,
-        padding: "6px 10px",
-        minWidth: 80,
+        padding: "5px 10px",
+        minWidth: 72,
       }}
     >
       <div
@@ -28,7 +93,7 @@ function Badge({ label, value, accent }) {
           letterSpacing: 2,
           color: "#444",
           textTransform: "uppercase",
-          marginBottom: 3,
+          marginBottom: 2,
         }}
       >
         {label}
@@ -48,90 +113,192 @@ function Badge({ label, value, accent }) {
 }
 
 function EventCard({ e }) {
-  const accent = "#ff2020";
-  const img = snapshotUrl(e.snapshot);
+  const [showFull, setShowFull] = useState(false);
+  const cfg = TYPE_CFG[e.fatigue_type] ?? TYPE_CFG.sleeping;
+  const accent = cfg.accent;
+  const cropUrl = imgUrl(e.crop_snapshot);
+  const fullUrl = imgUrl(e.snapshot);
 
   return (
     <div
       style={{
         background: "#0d0d0d",
-        border: "1px solid #1c1c1c",
+        border: `1px solid ${cfg.border}`,
         borderLeft: `3px solid ${accent}`,
         borderRadius: 8,
-        padding: 20,
+        padding: 18,
         display: "grid",
-        gridTemplateColumns: "100px 1fr",
-        gap: 20,
+        gridTemplateColumns: "120px 1fr",
+        gap: 18,
       }}
     >
-      {/* Keyframe */}
-      <div>
-        {img ? (
-          <img
-            src={img}
-            style={{
-              width: 100,
-              height: 70,
-              objectFit: "cover",
-              borderRadius: 4,
-              border: "1px solid #2a2a2a",
-            }}
-            alt="keyframe"
-          />
-        ) : (
+      {/* ── Left: crop + full scene ─────────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ position: "relative" }}>
+          {cropUrl ? (
+            <img
+              src={cropUrl}
+              alt={`P${e.person_id}`}
+              style={{
+                width: 120,
+                height: 165,
+                objectFit: "cover",
+                borderRadius: 6,
+                border: `2px solid ${accent}44`,
+                display: "block",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 120,
+                height: 165,
+                background: "#1a1a1a",
+                borderRadius: 6,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "column",
+                gap: 6,
+                border: "1px solid #2a2a2a",
+              }}
+            >
+              <span style={{ fontSize: 28 }}>{cfg.icon}</span>
+              <span style={{ fontSize: 9, color: "#333", letterSpacing: 1 }}>
+                NO CROP
+              </span>
+            </div>
+          )}
+          {/* Person ID overlay */}
           <div
             style={{
-              width: 100,
-              height: 70,
-              background: "#1a1a1a",
+              position: "absolute",
+              bottom: 6,
+              left: 6,
+              background: "#000000aa",
+              border: `1px solid ${accent}66`,
               borderRadius: 4,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#333",
-              fontSize: 9,
-              letterSpacing: 1,
+              padding: "2px 7px",
+              fontFamily: "monospace",
+              fontSize: 11,
+              color: accent,
+              fontWeight: 700,
             }}
           >
-            NO IMG
+            P{e.person_id ?? "?"}
+          </div>
+        </div>
+
+        {/* Full scene thumbnail */}
+        {fullUrl && (
+          <div
+            onMouseEnter={() => setShowFull(true)}
+            onMouseLeave={() => setShowFull(false)}
+            style={{ position: "relative", cursor: "pointer" }}
+          >
+            <img
+              src={fullUrl}
+              style={{
+                width: 120,
+                height: 68,
+                objectFit: "cover",
+                borderRadius: 4,
+                border: "1px solid #2a2a2a",
+                opacity: 0.55,
+                display: "block",
+              }}
+              alt="room"
+            />
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 9,
+                color: "#555",
+                letterSpacing: 1,
+              }}
+            >
+              FULL SCENE
+            </div>
+
+            {showFull && (
+              <div
+                style={{
+                  position: "fixed",
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%,-50%)",
+                  zIndex: 1000,
+                  background: "#000",
+                  border: `1px solid ${accent}44`,
+                  borderRadius: 8,
+                  padding: 8,
+                  boxShadow: "0 0 60px #000e",
+                }}
+              >
+                <img
+                  src={fullUrl}
+                  style={{
+                    maxWidth: "80vw",
+                    maxHeight: "80vh",
+                    borderRadius: 4,
+                    display: "block",
+                  }}
+                  alt="full scene"
+                />
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: "#444",
+                    textAlign: "center",
+                    marginTop: 6,
+                    fontFamily: "monospace",
+                  }}
+                >
+                  #{e.id} · P{e.person_id ?? "?"} · {e.camera_id}
+                </div>
+              </div>
+            )}
           </div>
         )}
+
         <div
           style={{
             fontSize: 9,
-            color: "#333",
-            marginTop: 4,
+            color: "#2a2a2a",
             fontFamily: "monospace",
             textAlign: "center",
           }}
         >
-          #{e.id} · {e.camera_id || "—"}
+          #{e.id} · {e.camera_id}
         </div>
       </div>
 
-      {/* Details */}
+      {/* ── Right: type + cause + metrics + summary ──────────────── */}
       <div>
-        {/* Timestamps */}
+        {/* Type badge + timestamps */}
         <div
           style={{
             display: "flex",
-            gap: 16,
-            marginBottom: 12,
-            fontSize: 11,
-            fontFamily: "monospace",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 10,
+            flexWrap: "wrap",
           }}
         >
-          <div>
-            <span style={{ color: "#444", marginRight: 6 }}>FROM</span>
-            <span style={{ color: "#bbb" }}>{fmt(e.started_at)}</span>
-          </div>
-          <div>
-            <span style={{ color: "#444", marginRight: 6 }}>TO</span>
-            <span style={{ color: e.ended_at ? "#bbb" : "#555" }}>
-              {fmt(e.ended_at) || "ongoing…"}
-            </span>
-          </div>
+          <TypeBadge type={e.fatigue_type} />
+          <span
+            style={{ fontSize: 10, color: "#444", fontFamily: "monospace" }}
+          >
+            {fmt(e.started_at)} → {e.ended_at ? fmt(e.ended_at) : "ongoing…"}
+          </span>
         </div>
+
+        {/* Why this record was created */}
+        <CauseBanner cause={e.fatigue_cause} />
 
         {/* Metric badges */}
         <div
@@ -143,13 +310,18 @@ function EventCard({ e }) {
           }}
         >
           <Badge
+            label="Person"
+            value={`P${e.person_id ?? "?"}`}
+            accent="#00bcd4"
+          />
+          <Badge
             label="Duration"
-            value={`${e.duration?.toFixed(1)}s`}
+            value={`${(e.duration || 0).toFixed(1)}s`}
             accent={accent}
           />
           <Badge
             label="Inactive"
-            value={`${e.inactive_seconds?.toFixed(1)}s`}
+            value={`${(e.inactive_seconds || 0).toFixed(1)}s`}
             accent="#ff6644"
           />
           <Badge
@@ -162,21 +334,24 @@ function EventCard({ e }) {
             value={`${((e.confidence || 0) * 100).toFixed(0)}%`}
             accent="#ffaa44"
           />
-          <Badge label="Trigger" value={e.trigger || "—"} accent="#888" />
+          <Badge label="Trigger" value={e.trigger || "—"} accent="#666" />
         </div>
 
-        {/* Summary */}
+        {/* LLM summary */}
         <div
           style={{
-            fontSize: 12,
-            color: "#666",
-            lineHeight: 1.6,
+            fontSize: 11,
+            color: "#555",
+            lineHeight: 1.7,
+            fontFamily: "monospace",
             borderTop: "1px solid #1a1a1a",
-            paddingTop: 8,
+            paddingTop: 10,
           }}
         >
-          {e.summary || (
-            <span style={{ color: "#333" }}>Generating summary…</span>
+          {e.summary ? (
+            e.summary
+          ) : (
+            <span style={{ color: "#2a2a2a" }}>Generating summary…</span>
           )}
         </div>
       </div>
@@ -186,11 +361,13 @@ function EventCard({ e }) {
 
 export default function Events() {
   const [events, setEvents] = useState([]);
+  const [filter, setFilter] = useState("all"); // "all" | "sleeping" | "drowsy"
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const load = () =>
-      getEvents()
+      axios
+        .get(`${API}/fatigue-events`)
         .then((r) => {
           setEvents(r.data);
           setError(null);
@@ -201,14 +378,22 @@ export default function Events() {
     return () => clearInterval(iv);
   }, []);
 
+  const visible =
+    filter === "all" ? events : events.filter((e) => e.fatigue_type === filter);
+
+  const nSleep = events.filter((e) => e.fatigue_type === "sleeping").length;
+  const nDrowsy = events.filter((e) => e.fatigue_type === "drowsy").length;
+
   return (
     <div>
+      {/* Header + filter tabs */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 12,
           marginBottom: 16,
+          flexWrap: "wrap",
         }}
       >
         <h2
@@ -220,22 +405,44 @@ export default function Events() {
             margin: 0,
           }}
         >
-          Sleep Records
+          Fatigue Records
         </h2>
-        <span style={{ fontSize: 11, color: "#333", fontFamily: "monospace" }}>
-          {events.length} event{events.length !== 1 ? "s" : ""}
-        </span>
+
+        {/* Filter tabs */}
+        {[
+          { key: "all", label: `ALL  ${events.length}` },
+          { key: "sleeping", label: `😴 SLEEPING  ${nSleep}` },
+          { key: "drowsy", label: `😪 DROWSY  ${nDrowsy}` },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setFilter(tab.key)}
+            style={{
+              background: filter === tab.key ? "#1a1a1a" : "transparent",
+              border: `1px solid ${filter === tab.key ? "#444" : "#222"}`,
+              borderRadius: 6,
+              padding: "4px 12px",
+              color: filter === tab.key ? "#ddd" : "#444",
+              fontSize: 10,
+              fontFamily: "monospace",
+              letterSpacing: 1,
+              cursor: "pointer",
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {error && <p style={{ color: "#ff4444", fontSize: 12 }}>⚠ {error}</p>}
+      {error && <p style={{ color: "#f44", fontSize: 12 }}>⚠ {error}</p>}
 
-      {events.length === 0 ? (
+      {visible.length === 0 ? (
         <p style={{ color: "#2a2a2a", fontSize: 12, fontFamily: "monospace" }}>
-          No events recorded yet.
+          No {filter === "all" ? "" : filter + " "}records yet.
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {events.map((e) => (
+          {visible.map((e) => (
             <EventCard key={e.id} e={e} />
           ))}
         </div>
