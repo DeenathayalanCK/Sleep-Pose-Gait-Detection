@@ -85,3 +85,46 @@ YOLO_IOU         = _float("YOLO_IOU",        "0.45")
 POSTURE_WALK_MOTION_THRESHOLD = _float("POSTURE_WALK_MOTION_THRESHOLD", "5.0")
 POSTURE_SIT_Y_RATIO           = _float("POSTURE_SIT_Y_RATIO",           "0.20")
 POSTURE_STAND_Y_RATIO         = _float("POSTURE_STAND_Y_RATIO",         "0.12")
+# ── EAR / PERCLOS ─────────────────────────────────────────────────────────────
+# PERCLOS: % of frames eye is closed in rolling window — drowsiness gold standard
+PERCLOS_DROWSY_THRESHOLD = _float("PERCLOS_DROWSY_THRESHOLD", "0.15")  # 15% → drowsy
+PERCLOS_SLEEP_THRESHOLD  = _float("PERCLOS_SLEEP_THRESHOLD",  "0.40")  # 40% → sleeping
+PERCLOS_WINDOW_FRAMES    = _int("PERCLOS_WINDOW_FRAMES",       "60")    # rolling window
+EAR_FACE_CONF_MIN        = _float("EAR_FACE_CONF_MIN",         "0.50")  # min face confidence
+
+# ── Walk / inactivity display ──────────────────────────────────────────────────
+WALK_CENTROID_PX         = _int("WALK_CENTROID_PX",            "8")
+WALK_CENTROID_FRAMES     = _int("WALK_CENTROID_FRAMES",         "4")
+INACTIVE_DISPLAY_SECONDS = _float("INACTIVE_DISPLAY_SECONDS",  "5.0")
+
+# ── Posture knee geometry ──────────────────────────────────────────────────────
+POSTURE_SEATED_KNEE_X_GAP   = _float("POSTURE_SEATED_KNEE_X_GAP",   "0.06")
+POSTURE_STANDING_KNEE_Y_GAP = _float("POSTURE_STANDING_KNEE_Y_GAP", "0.12")
+
+# ── Multi-signal fatigue thresholds ───────────────────────────────────────────
+HEAD_DROP_DROWSY_DEG = _float("HEAD_DROP_DROWSY_DEG", "25.0")
+HEAD_DROP_SLEEP_DEG  = _float("HEAD_DROP_SLEEP_DEG",  "40.0")
+HEAD_TILT_SLEEP_DEG  = _float("HEAD_TILT_SLEEP_DEG",  "35.0")
+SPINE_DROWSY_DEG     = _float("SPINE_DROWSY_DEG",     "30.0")
+SPINE_SLEEP_DEG      = _float("SPINE_SLEEP_DEG",      "50.0")
+WRIST_ACTIVE_MIN     = _float("WRIST_ACTIVE_MIN",      "0.005")
+SIGNAL_SMOOTH_FRAMES = _int("SIGNAL_SMOOTH_FRAMES",    "10")
+
+# ── ReID appearance matching ───────────────────────────────────────────────────
+REID_MATCH_THRESHOLD   = _float("REID_MATCH_THRESHOLD",   "0.82")  # cosine similarity
+REID_GALLERY_TIMEOUT   = _float("REID_GALLERY_TIMEOUT",   "300.0") # 5 min memory
+REID_EMB_HISTORY       = _int("REID_EMB_HISTORY",          "5")    # avg last N embeddings
+REID_UPDATE_EVERY_FRAMES = _int("REID_UPDATE_EVERY_FRAMES","15")   # update freq (frames)
+
+# ── Per-person Z-score baseline (anomaly detection) ───────────────────────────
+# Drowsy if signal > Z_DROWSY_THRESHOLD standard deviations above personal norm
+Z_DROWSY_THRESHOLD  = _float("Z_DROWSY_THRESHOLD",  "2.0")
+# Sleeping if signal > Z_SLEEP_THRESHOLD standard deviations above personal norm
+Z_SLEEP_THRESHOLD   = _float("Z_SLEEP_THRESHOLD",   "3.0")
+# Frames of confirmed-awake activity needed before z-score is used
+# At ~0.5 pose fps per person crop: 150 frames ≈ 5 minutes of active work
+ZSCORE_WARMUP_FRAMES = _int("ZSCORE_WARMUP_FRAMES",  "150")
+# Minimum std dev floor — prevents over-sensitivity when person is very still
+ZSCORE_MIN_STD      = _float("ZSCORE_MIN_STD",       "2.0")
+# EMA alpha for slow baseline drift (0.02 = very slow adaptation)
+ZSCORE_EMA_ALPHA    = _float("ZSCORE_EMA_ALPHA",     "0.02")

@@ -105,6 +105,7 @@ def monitor():
             # ── Update /status ────────────────────────────────────────
             current_persons.clear()
             for tid, ps in person_states.items():
+                z = ps.analysis.z_score
                 current_persons[str(tid)] = {
                     "track_id":         tid,
                     "state":            ps.state,
@@ -114,6 +115,12 @@ def monitor():
                     "motion_score":     ps.analysis.motion_score,
                     "pose_visible":     ps.analysis.pose_visible,
                     "signals":          ps.analysis.signals,
+                    # Z-score baseline info (shown in Live status panel)
+                    "z_baseline_ready": z.baseline_ready         if z else False,
+                    "z_samples":        z.samples_collected      if z else 0,
+                    "z_max":            round(z.max_z, 2)        if z else None,
+                    "z_triggered":      z.triggered_signal       if z else None,
+                    "z_scores":         z.to_dict()["z_scores"]  if (z and z.baseline_ready) else {},
                     "updated_at":       datetime.datetime.now().isoformat(),
                 }
 

@@ -22,6 +22,7 @@ from app.config import (
 from app.detection.sleep_pose_detector import SleepPoseDetector, SleepAnalysis
 from app.engine.fatigue_engine import FatigueEngine
 from app.engine.state_analyzer import StateAnalyzer
+from app.detection.reid_tracker import ReIDTracker
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +54,14 @@ class PersonState:
     )
     # How many recent frames had significant centroid movement
     walk_frame_count: int = 0
+    # Track original ID before ReID reassignment (for logging)
+    original_id: int = 0
 
 
 class TrackManager:
     def __init__(self):
         self._states: dict[int, PersonState] = {}
+        self._reid = ReIDTracker()
 
     def update(self, persons: list, frame,
                annotated_frame=None) -> dict[int, "PersonState"]:
@@ -76,14 +80,37 @@ class TrackManager:
             active_ids.add(tid)
 
             if tid not in self._states:
-                self._states[tid] = PersonState(
-                    track_id       = tid,
-                    detector       = SleepPoseDetector(),
-                    engine         = FatigueEngine(person_id=tid),
-                    state_analyzer = StateAnalyzer(),
-                    session_start  = now_dt,
+                # ── ReID: try to match to a known gallery entry ────────
+                crop_for_reid = person.crop(frame, pad=20)
+                active_ids_set = set(active_ids)  # IDs already confirmed this frame
+                matched_id = self._reid.match(
+                    crop_for_reid, now,
+                    exclude_ids=active_ids_set - {tid}
                 )
-                logger.info(f"New person tracked: ID={tid}")
+
+                if matched_id is not None and matched_id in self._states:
+                    # Re-entry match — reuse existing PersonState (keeps history)
+                    existing = self._states.pop(matched_id)
+                    existing.track_id    = tid
+                    existing.original_id = matched_id
+                    self._states[tid]    = existing
+                    self._reid.reassign(matched_id, tid)
+                    logger.info(
+                        f"ReID: track {tid} matched to returning person "
+                        f"{matched_id} (history preserved)"
+                    )
+                else:
+                    # Brand new person
+                    self._states[tid] = PersonState(
+                        track_id       = tid,
+                        detector       = SleepPoseDetector(),
+                        engine         = FatigueEngine(person_id=tid),
+                        state_analyzer = StateAnalyzer(),
+                        session_start  = now_dt,
+                        original_id    = tid,
+                    )
+                    self._reid.register(tid, crop_for_reid, now)
+                    logger.info(f"New person tracked: ID={tid}")
 
             ps = self._states[tid]
             ps.last_seen = now
@@ -112,6 +139,8 @@ class TrackManager:
                     analysis  = _remap_landmarks(analysis, person, crop.shape, fh, fw)
                     ps.analysis = analysis
                     pose_budget -= 1
+                    # Update ReID gallery for this confirmed track
+                    self._reid.update(tid, crop, now)
 
             # ── Final state resolution ─────────────────────────────────
             pose_st  = ps.analysis.state
@@ -167,6 +196,9 @@ class TrackManager:
                     logger.info(f"Track ID={tid} expired after {absent:.0f}s")
                     ps.detector.close()
                     del self._states[tid]
+
+        # Evict stale ReID gallery entries periodically
+        self._reid.evict_stale(now)
 
         return {tid: self._states[tid] for tid in active_ids if tid in self._states}
 
