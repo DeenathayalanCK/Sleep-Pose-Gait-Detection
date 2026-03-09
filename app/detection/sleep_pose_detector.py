@@ -5,6 +5,7 @@ import time
 import logging
 import numpy as np
 import mediapipe as mp
+from collections import deque
 from dataclasses import dataclass, field
 
 from app.config import (
@@ -13,12 +14,24 @@ from app.config import (
     POSE_DETECTION_CONFIDENCE, POSE_TRACKING_CONFIDENCE,
     POSE_LANDMARK_MIN_VISIBILITY, RECLINE_SMOOTH_FRAMES,
 )
+from app.detection.body_signals import extract_body_signals
 
 logger = logging.getLogger(__name__)
 
 _NOSE=0; _L_SHOULDER=11; _R_SHOULDER=12
 _L_HIP=23; _R_HIP=24; _L_KNEE=25; _R_KNEE=26
 _L_ANKLE=27; _R_ANKLE=28; _L_WRIST=15; _R_WRIST=16
+
+# ── Calibrated thresholds (can be overridden per .env or calibration DB) ──────
+# These are defaults that work for a side-mounted office camera.
+# The calibration tool writes camera-specific values to .env.
+_HEAD_DROP_DROWSY   = float(os.getenv("HEAD_DROP_DROWSY_DEG",   "25.0"))  # degrees
+_HEAD_DROP_SLEEP    = float(os.getenv("HEAD_DROP_SLEEP_DEG",    "40.0"))  # degrees
+_HEAD_TILT_SLEEP    = float(os.getenv("HEAD_TILT_SLEEP_DEG",    "35.0"))  # degrees lateral
+_SPINE_DROWSY       = float(os.getenv("SPINE_DROWSY_DEG",       "30.0"))  # degrees from vertical
+_SPINE_SLEEP        = float(os.getenv("SPINE_SLEEP_DEG",        "50.0"))  # degrees from vertical
+_WRIST_ACTIVE_MIN   = float(os.getenv("WRIST_ACTIVE_MIN",       "0.005")) # min wrist movement = typing
+_SMOOTH_WINDOW      = int(os.getenv("SIGNAL_SMOOTH_FRAMES",     "10"))    # frames to smooth signals
 
 
 @dataclass
@@ -31,6 +44,7 @@ class SleepAnalysis:
     pose_visible:     bool  = False
     pose_landmarks:   object = None
     debug:            dict  = field(default_factory=dict)
+    signals:          dict  = field(default_factory=dict)  # NEW: raw body signals
 
 
 class MotionDetector:
@@ -62,6 +76,24 @@ class InactivityTimer:
         self._last_move = time.monotonic()
 
 
+class SignalSmoother:
+    """
+    Smooths any float signal over a rolling window.
+    Eliminates per-frame noise that causes state flickering.
+    """
+    def __init__(self, window: int = 10):
+        self._buf: deque = deque(maxlen=window)
+
+    def update(self, value: float | None) -> float | None:
+        if value is None:
+            return None
+        self._buf.append(value)
+        return float(np.mean(self._buf))
+
+    def mean(self) -> float | None:
+        return float(np.mean(self._buf)) if self._buf else None
+
+
 def _lm(landmarks, idx, w, h):
     lm = landmarks.landmark[idx]
     if lm.visibility < POSE_LANDMARK_MIN_VISIBILITY:
@@ -88,20 +120,31 @@ def compute_recline_ratio(landmarks, w, h):
 
 class SleepPoseDetector:
     """
-    Camera-agnostic sleep detector. All thresholds from config/env.
+    Multi-signal fatigue detector.
 
-    Detection paths:
-      SLEEPING  — inactive >= SLEEP_SECONDS                         (primary)
-      SLEEPING  — recline >= RECLINE_THRESHOLD
-                  AND inactive >= SLEEP_SECONDS_RECLINED            (posture boost)
-      DROWSY    — inactive >= DROWSY_SECONDS
-                  AND recline >= RECLINE_MIN                        (both required)
-                  OR  inactive >= DROWSY_SECONDS * 1.5              (long inactivity alone)
+    SIGNALS USED (all smoothed over rolling window):
+      1. Inactivity timer           — body not moving
+      2. Recline ratio              — body orientation (proxy for lying down)
+      3. Spine angle                — NEW: torso tilt from vertical
+      4. Head drop angle            — NEW: head drooping forward
+      5. Head lateral tilt          — NEW: head fallen sideways
+      6. Wrist activity             — NEW: hands moving = typing = awake
 
-    KEY FIX: recline alone no longer triggers drowsy.
-    Both inactivity AND recline must be present together.
-    This prevents people leaning forward (typing, reading) from being
-    falsely flagged as drowsy.
+    DECISION (multi-signal fusion):
+      SLEEPING if ANY of:
+        • inactivity >= SLEEP_SECONDS
+        • recline >= RECLINE_THRESHOLD + inactivity >= SLEEP_SECONDS_RECLINED
+        • head_drop >= HEAD_DROP_SLEEP + inactivity >= DROWSY_SECONDS
+        • head_tilt >= HEAD_TILT_SLEEP  (head fallen sideways)
+        • spine_angle >= SPINE_SLEEP + inactivity >= DROWSY_SECONDS
+
+      DROWSY if ANY of:
+        • inactivity >= DROWSY_SECONDS + (recline OR head_drop)
+        • head_drop >= HEAD_DROP_DROWSY + some inactivity
+        • spine_angle >= SPINE_DROWSY + inactivity >= DROWSY_SECONDS/2
+
+      WRIST OVERRIDE: if wrist_activity > WRIST_ACTIVE_MIN → never sleeping/drowsy
+        (actively typing hands prove wakefulness regardless of head/spine signals)
     """
 
     def __init__(self):
@@ -114,14 +157,22 @@ class SleepPoseDetector:
         self._motion           = MotionDetector()
         self._inactivity       = InactivityTimer()
         self._last_pose_time   = time.monotonic()
-        self._recline_history: list[float] = []
+        self._recline_history  = []
+        self._prev_wrist_pos   = None
+
+        # Per-signal smoothers
+        self._sm_head_drop  = SignalSmoother(_SMOOTH_WINDOW)
+        self._sm_head_tilt  = SignalSmoother(_SMOOTH_WINDOW)
+        self._sm_spine      = SignalSmoother(_SMOOTH_WINDOW)
+        self._sm_wrist      = SignalSmoother(_SMOOTH_WINDOW)
+        self._sm_recline    = SignalSmoother(RECLINE_SMOOTH_FRAMES)
 
     def process(self, bgr_frame: np.ndarray) -> SleepAnalysis:
         import cv2
         h, w = bgr_frame.shape[:2]
 
-        gray         = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
-        motion       = self._motion.update(gray)
+        gray          = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2GRAY)
+        motion        = self._motion.update(gray)
         inactive_secs = self._inactivity.update(motion)
 
         rgb    = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
@@ -141,47 +192,105 @@ class SleepPoseDetector:
         self._last_pose_time = time.monotonic()
         lms = result.pose_landmarks
 
-        recline = compute_recline_ratio(lms, w, h)
-        if recline is not None:
-            self._recline_history.append(recline)
-            if len(self._recline_history) > RECLINE_SMOOTH_FRAMES:
-                self._recline_history.pop(0)
+        # ── Extract and smooth all body signals ───────────────────────
+        raw_sigs = extract_body_signals(lms, self._prev_wrist_pos)
+        self._prev_wrist_pos = raw_sigs.get("wrist_pos")
 
-        smooth_recline    = float(np.mean(self._recline_history)) if self._recline_history else 0.0
+        head_drop  = self._sm_head_drop.update(raw_sigs["head_drop_angle"])
+        head_tilt  = self._sm_head_tilt.update(raw_sigs["head_tilt_angle"])
+        spine_ang  = self._sm_spine.update(raw_sigs["spine_angle"])
+        wrist_act  = self._sm_wrist.update(raw_sigs["wrist_activity"])
+
+        # ── Recline ratio (existing, keep for backward compat) ────────
+        raw_recline = compute_recline_ratio(lms, w, h)
+        smooth_recline = self._sm_recline.update(raw_recline) or 0.0
+
         clearly_reclined  = smooth_recline >= RECLINE_THRESHOLD
         somewhat_reclined = smooth_recline >= RECLINE_MIN
 
-        sleeping_by_inactivity = inactive_secs >= SLEEP_SECONDS
-        sleeping_by_recline    = clearly_reclined and inactive_secs >= SLEEP_SECONDS_RECLINED
-        sleeping = sleeping_by_inactivity or sleeping_by_recline
+        # ── Wrist activity override ────────────────────────────────────
+        # If hands are actively moving → person is awake (typing, working)
+        # This is the most reliable anti-false-positive signal we have.
+        wrist_active = (wrist_act is not None and wrist_act > _WRIST_ACTIVE_MIN)
 
-        # ── FIXED DROWSY LOGIC ───────────────────────────────────────────
-        # Old: inactive >= DROWSY_SECONDS OR recline >= RECLINE_MIN
-        #      ↑ recline alone caused false positives for laptop users
-        #
-        # New: (inactive >= DROWSY_SECONDS AND recline present)
-        #      OR inactive >= DROWSY_SECONDS * 1.5   (extended stillness alone)
-        #
-        # Person typing on laptop:  recline=0.40, inactive=2s  → NOT drowsy ✓
-        # Person drowsy at desk:    recline=0.42, inactive=9s  → DROWSY ✓
-        # Person completely still:  recline=0.20, inactive=12s → DROWSY ✓
-        drowsy = (
-            not sleeping and (
-                (inactive_secs >= DROWSY_SECONDS and somewhat_reclined)
-                or inactive_secs >= DROWSY_SECONDS * 1.5
-            )
+        # ── Multi-signal sleeping detection ───────────────────────────
+        sleep_by_inactivity = inactive_secs >= SLEEP_SECONDS
+        sleep_by_recline    = clearly_reclined and inactive_secs >= SLEEP_SECONDS_RECLINED
+        sleep_by_head_drop  = (
+            head_drop is not None
+            and head_drop >= _HEAD_DROP_SLEEP
+            and inactive_secs >= DROWSY_SECONDS
+        )
+        sleep_by_head_tilt  = (
+            head_tilt is not None
+            and head_tilt >= _HEAD_TILT_SLEEP
+            and inactive_secs >= DROWSY_SECONDS
+        )
+        sleep_by_spine      = (
+            spine_ang is not None
+            and spine_ang >= _SPINE_SLEEP
+            and inactive_secs >= DROWSY_SECONDS
         )
 
+        sleeping = (
+            sleep_by_inactivity or sleep_by_recline or
+            sleep_by_head_drop  or sleep_by_head_tilt or sleep_by_spine
+        ) and not wrist_active   # wrist override
+
+        # ── Multi-signal drowsy detection ─────────────────────────────
+        drowsy_by_inactivity_recline = (
+            inactive_secs >= DROWSY_SECONDS and somewhat_reclined
+        )
+        drowsy_by_inactivity_alone = inactive_secs >= DROWSY_SECONDS * 1.5
+        drowsy_by_head_drop = (
+            head_drop is not None
+            and head_drop >= _HEAD_DROP_DROWSY
+            and inactive_secs >= DROWSY_SECONDS * 0.5
+        )
+        drowsy_by_spine = (
+            spine_ang is not None
+            and spine_ang >= _SPINE_DROWSY
+            and inactive_secs >= DROWSY_SECONDS * 0.5
+        )
+
+        drowsy = (
+            not sleeping and (
+                drowsy_by_inactivity_recline or
+                drowsy_by_inactivity_alone   or
+                drowsy_by_head_drop          or
+                drowsy_by_spine
+            ) and not wrist_active
+        )
+
+        # ── Confidence scoring ────────────────────────────────────────
         if sleeping:
-            state      = "sleeping"
-            inact_conf = min(1.0, inactive_secs / SLEEP_SECONDS)
-            recl_conf  = min(1.0, smooth_recline / RECLINE_THRESHOLD) if RECLINE_THRESHOLD > 0 else 0.5
-            confidence = min(1.0, (inact_conf + recl_conf) / 2 + 0.1)
-            trigger    = "inactivity" if sleeping_by_inactivity else "recline"
+            # More signals firing = higher confidence
+            signals_firing = sum([
+                sleep_by_inactivity, sleep_by_recline,
+                sleep_by_head_drop, sleep_by_head_tilt, sleep_by_spine
+            ])
+            confidence = min(1.0, 0.5 + signals_firing * 0.15)
+            trigger    = (
+                "head_drop"  if sleep_by_head_drop else
+                "head_tilt"  if sleep_by_head_tilt else
+                "spine"      if sleep_by_spine     else
+                "recline"    if sleep_by_recline   else
+                "inactivity"
+            )
+            state = "sleeping"
+
         elif drowsy:
-            state      = "drowsy"
-            confidence = 0.4 + 0.4 * min(1.0, inactive_secs / DROWSY_SECONDS)
-            trigger    = "drowsy"
+            signals_firing = sum([
+                drowsy_by_inactivity_recline, drowsy_by_head_drop, drowsy_by_spine
+            ])
+            confidence = min(1.0, 0.35 + signals_firing * 0.2)
+            trigger    = (
+                "head_drop" if drowsy_by_head_drop else
+                "spine"     if drowsy_by_spine     else
+                "drowsy"
+            )
+            state = "drowsy"
+
         else:
             state      = "awake"
             confidence = max(0.0, 1.0 - (inactive_secs / SLEEP_SECONDS))
@@ -195,13 +304,37 @@ class SleepPoseDetector:
             motion_score=round(motion, 2),
             pose_visible=True,
             pose_landmarks=lms,
+            signals={
+                # Fatigue signals (smoothed)
+                "head_drop_angle":    head_drop,
+                "head_tilt_angle":    head_tilt,
+                "spine_angle":        spine_ang,
+                "wrist_active":       wrist_active,
+                "recline":            round(smooth_recline, 3),
+                # Posture signals (raw — needed by calibration tool)
+                "knee_hip_y_gap":     raw_sigs.get("knee_hip_y_gap"),
+                "knee_hip_x_gap":     raw_sigs.get("knee_hip_x_gap"),
+                "torso_compactness":  raw_sigs.get("torso_compactness"),
+                "sh_hip_y_gap":       raw_sigs.get("sh_hip_y_gap"),
+                "shoulder_ear_ratio": raw_sigs.get("shoulder_ear_ratio"),
+                "wrist_activity":     raw_sigs.get("wrist_activity"),
+            },
             debug={
-                "raw_recline":      round(recline, 3) if recline else None,
-                "smooth_recline":   round(smooth_recline, 3),
-                "clearly_reclined": clearly_reclined,
+                "trigger":          trigger,
                 "inactive_s":       round(inactive_secs, 1),
                 "motion":           round(motion, 2),
-                "trigger":          trigger,
+                "smooth_recline":   round(smooth_recline, 3),
+                "head_drop":        round(head_drop, 1) if head_drop else None,
+                "head_tilt":        round(head_tilt, 1) if head_tilt else None,
+                "spine_angle":      round(spine_ang, 1) if spine_ang else None,
+                "wrist_active":     wrist_active,
+                "sleep_flags": {
+                    "inactivity": sleep_by_inactivity,
+                    "recline":    sleep_by_recline,
+                    "head_drop":  sleep_by_head_drop,
+                    "head_tilt":  sleep_by_head_tilt,
+                    "spine":      sleep_by_spine,
+                },
             },
         )
 

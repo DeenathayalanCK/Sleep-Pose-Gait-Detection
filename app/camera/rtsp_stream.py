@@ -1,46 +1,59 @@
+"""
+RTSPStream — same 1-slot architecture as VideoReader.
+Kept separate because RTSP needs reconnect logic on dropout.
+"""
 import cv2
 import threading
 import logging
-from app.camera.frame_buffer import FrameBuffer
+import time
 
 logger = logging.getLogger(__name__)
 
 
 class RTSPStream:
-    """
-    Reads an RTSP stream on a background thread and exposes the latest frame
-    via a FrameBuffer.
-
-    BUG FIX: rtsp_stream.py was completely empty.  This is the correct
-    pattern for RTSP — blocking cap.read() in the main thread causes the
-    processing pipeline to stall on network latency.
-    """
-
-    def __init__(self, url: str):
-        self.url    = url
-        self.buffer = FrameBuffer()
-        self._stop  = threading.Event()
-        self._thread = threading.Thread(target=self._read_loop, daemon=True)
-
-    def start(self):
+    def __init__(self, url: str,
+                 width: int = 640, height: int = 480):
+        self._url    = url
+        self._width  = width
+        self._height = height
+        self._frame  = None
+        self._lock   = threading.Lock()
+        self._stop   = threading.Event()
+        self._thread = threading.Thread(
+            target=self._read_loop, daemon=True, name="RTSPStream"
+        )
         self._thread.start()
-        logger.info(f"RTSP stream started: {self.url}")
+
+    def read(self):
+        with self._lock:
+            return self._frame.copy() if self._frame is not None else None
 
     def stop(self):
         self._stop.set()
 
-    def read(self):
-        return self.buffer.get()
-
     def _read_loop(self):
-        cap = cv2.VideoCapture(self.url)
-        if not cap.isOpened():
-            logger.error(f"Cannot open RTSP stream: {self.url}")
-            return
-
         while not self._stop.is_set():
-            ret, frame = cap.read()
-            if ret:
-                self.buffer.put(frame)
+            cap = cv2.VideoCapture(self._url)
+            if not cap.isOpened():
+                logger.error(f"Cannot open RTSP: {self._url} — retry in 5s")
+                time.sleep(5)
+                continue
 
-        cap.release()
+            # 1-frame buffer — critical for RTSP latency
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            logger.info(f"RTSP connected: {self._url}")
+
+            while not self._stop.is_set():
+                ret, frame = cap.read()
+                if not ret:
+                    logger.warning("RTSP read failed — reconnecting")
+                    break
+                if self._width and self._height:
+                    frame = cv2.resize(frame, (self._width, self._height))
+                with self._lock:
+                    self._frame = frame  # always latest, old frame discarded
+
+            cap.release()
+            if not self._stop.is_set():
+                logger.info("RTSP reconnecting in 2s…")
+                time.sleep(2)
