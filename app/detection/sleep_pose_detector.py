@@ -15,6 +15,7 @@ from app.config import (
     POSE_LANDMARK_MIN_VISIBILITY, RECLINE_SMOOTH_FRAMES,
 )
 from app.detection.body_signals import extract_body_signals
+from app.detection.ear_integrator import EARIntegrator, EARResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +26,8 @@ _L_ANKLE=27; _R_ANKLE=28; _L_WRIST=15; _R_WRIST=16
 # ── Calibrated thresholds (can be overridden per .env or calibration DB) ──────
 # These are defaults that work for a side-mounted office camera.
 # The calibration tool writes camera-specific values to .env.
-_HEAD_DROP_DROWSY   = float(os.getenv("HEAD_DROP_DROWSY_DEG",   "25.0"))  # degrees
-_HEAD_DROP_SLEEP    = float(os.getenv("HEAD_DROP_SLEEP_DEG",    "40.0"))  # degrees
+_HEAD_DROP_DROWSY   = float(os.getenv("HEAD_DROP_DROWSY_DEG",   "40.0"))  # degrees — raised for top-angle camera
+_HEAD_DROP_SLEEP    = float(os.getenv("HEAD_DROP_SLEEP_DEG",    "55.0"))  # degrees — raised: top-angle camera reads 40-50° for normal forward lean
 _HEAD_TILT_SLEEP    = float(os.getenv("HEAD_TILT_SLEEP_DEG",    "35.0"))  # degrees lateral
 _SPINE_DROWSY       = float(os.getenv("SPINE_DROWSY_DEG",       "30.0"))  # degrees from vertical
 _SPINE_SLEEP        = float(os.getenv("SPINE_SLEEP_DEG",        "50.0"))  # degrees from vertical
@@ -44,7 +45,8 @@ class SleepAnalysis:
     pose_visible:     bool  = False
     pose_landmarks:   object = None
     debug:            dict  = field(default_factory=dict)
-    signals:          dict  = field(default_factory=dict)  # NEW: raw body signals
+    signals:          dict  = field(default_factory=dict)  # raw body signals
+    ear:              object = None   # EARResult — None if face not visible
 
 
 class MotionDetector:
@@ -160,6 +162,9 @@ class SleepPoseDetector:
         self._recline_history  = []
         self._prev_wrist_pos   = None
 
+        # EAR / PERCLOS tracker
+        self._ear = EARIntegrator()
+
         # Per-signal smoothers
         self._sm_head_drop  = SignalSmoother(_SMOOTH_WINDOW)
         self._sm_head_tilt  = SignalSmoother(_SMOOTH_WINDOW)
@@ -177,6 +182,9 @@ class SleepPoseDetector:
 
         rgb    = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
         result = self._pose.process(rgb)
+
+        # ── EAR / PERCLOS (independent of pose) ──────────────────────
+        ear_result = self._ear.process(bgr_frame)
 
         if result.pose_landmarks is None:
             gap   = time.monotonic() - self._last_pose_time
@@ -213,13 +221,27 @@ class SleepPoseDetector:
         # This is the most reliable anti-false-positive signal we have.
         wrist_active = (wrist_act is not None and wrist_act > _WRIST_ACTIVE_MIN)
 
+        # ── EAR / PERCLOS signal integration ─────────────────────────
+        sleep_by_ear  = ear_result.sleep_by_ear   if ear_result else False
+        drowsy_by_ear = ear_result.drowsy_by_ear  if ear_result else False
+
         # ── Multi-signal sleeping detection ───────────────────────────
         sleep_by_inactivity = inactive_secs >= SLEEP_SECONDS
         sleep_by_recline    = clearly_reclined and inactive_secs >= SLEEP_SECONDS_RECLINED
+        # Head drop sleeping: requires HIGH angle + LONG inactivity + corroboration
+        # Top-angle cameras produce inflated head_drop values for forward lean.
+        # Require at least one other signal to confirm it's sleep, not reading.
+        _wrist_idle = (wrist_act is None or wrist_act <= _WRIST_ACTIVE_MIN)
+        _corroborated = (
+            somewhat_reclined or                          # body leaning back
+            (ear_result and ear_result.perclos >= 0.10)  # any eye closure
+        )
         sleep_by_head_drop  = (
             head_drop is not None
             and head_drop >= _HEAD_DROP_SLEEP
-            and inactive_secs >= DROWSY_SECONDS
+            and inactive_secs >= SLEEP_SECONDS           # full sleep threshold, not drowsy
+            and _wrist_idle                              # hands not moving
+            and _corroborated                            # at least 1 more signal agrees
         )
         sleep_by_head_tilt  = (
             head_tilt is not None
@@ -234,18 +256,21 @@ class SleepPoseDetector:
 
         sleeping = (
             sleep_by_inactivity or sleep_by_recline or
-            sleep_by_head_drop  or sleep_by_head_tilt or sleep_by_spine
-        ) and not wrist_active   # wrist override
+            sleep_by_head_drop  or sleep_by_head_tilt or sleep_by_spine or
+            sleep_by_ear        # PERCLOS >= 40% = strong sleep signal
+        ) and not wrist_active
 
         # ── Multi-signal drowsy detection ─────────────────────────────
         drowsy_by_inactivity_recline = (
             inactive_secs >= DROWSY_SECONDS and somewhat_reclined
         )
         drowsy_by_inactivity_alone = inactive_secs >= DROWSY_SECONDS * 1.5
+        # Drowsy head drop: wrist must be idle — typing with head forward is normal
         drowsy_by_head_drop = (
             head_drop is not None
             and head_drop >= _HEAD_DROP_DROWSY
-            and inactive_secs >= DROWSY_SECONDS * 0.5
+            and inactive_secs >= DROWSY_SECONDS          # full drowsy window, not half
+            and _wrist_idle                              # not typing
         )
         drowsy_by_spine = (
             spine_ang is not None
@@ -258,7 +283,8 @@ class SleepPoseDetector:
                 drowsy_by_inactivity_recline or
                 drowsy_by_inactivity_alone   or
                 drowsy_by_head_drop          or
-                drowsy_by_spine
+                drowsy_by_spine              or
+                drowsy_by_ear               # PERCLOS >= 15%
             ) and not wrist_active
         )
 
@@ -267,10 +293,12 @@ class SleepPoseDetector:
             # More signals firing = higher confidence
             signals_firing = sum([
                 sleep_by_inactivity, sleep_by_recline,
-                sleep_by_head_drop, sleep_by_head_tilt, sleep_by_spine
+                sleep_by_head_drop, sleep_by_head_tilt,
+                sleep_by_spine, sleep_by_ear
             ])
             confidence = min(1.0, 0.5 + signals_firing * 0.15)
             trigger    = (
+                "perclos"    if sleep_by_ear       else
                 "head_drop"  if sleep_by_head_drop else
                 "head_tilt"  if sleep_by_head_tilt else
                 "spine"      if sleep_by_spine     else
@@ -285,6 +313,7 @@ class SleepPoseDetector:
             ])
             confidence = min(1.0, 0.35 + signals_firing * 0.2)
             trigger    = (
+                "perclos"   if drowsy_by_ear       else
                 "head_drop" if drowsy_by_head_drop else
                 "spine"     if drowsy_by_spine     else
                 "drowsy"
@@ -304,7 +333,12 @@ class SleepPoseDetector:
             motion_score=round(motion, 2),
             pose_visible=True,
             pose_landmarks=lms,
+            ear=ear_result,
             signals={
+                # EAR / PERCLOS
+                "perclos":            ear_result.perclos     if ear_result and ear_result.face_found else None,
+                "ear":                ear_result.ear         if ear_result and ear_result.face_found else None,
+                "eyes_closed":        ear_result.eyes_closed if ear_result and ear_result.face_found else None,
                 # Fatigue signals (smoothed)
                 "head_drop_angle":    head_drop,
                 "head_tilt_angle":    head_tilt,
@@ -340,3 +374,4 @@ class SleepPoseDetector:
 
     def close(self):
         self._pose.close()
+        self._ear.close()
