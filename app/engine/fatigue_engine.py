@@ -18,14 +18,20 @@ def _build_cause(state: str, analysis: SleepAnalysis) -> str:
     inactive = analysis.inactive_seconds
     recline  = analysis.reclined_ratio
     trigger  = analysis.debug.get("trigger", "")
-    sigs     = analysis.signals or {}
-    perclos  = sigs.get("perclos")
-    head_drop= sigs.get("head_drop_angle")
+    sigs      = analysis.signals or {}
+    perclos   = sigs.get("perclos")
+    head_drop = sigs.get("head_drop_angle")
+    z_result  = analysis.z_score
+    max_z     = z_result.max_z           if (z_result and z_result.baseline_ready) else None
+    z_trigger = z_result.triggered_signal if (z_result and z_result.baseline_ready) else None
 
     if state == "sleeping":
         if trigger == "perclos" and perclos is not None:
             return (f"Eyes closed {perclos:.0%} of last 60 frames (PERCLOS) "
                     f"— direct physiological sleep signal")
+        elif trigger == "z_score" and max_z is not None:
+            return (f"Z-score anomaly: {z_trigger} is {max_z:.1f}σ above personal baseline "
+                    f"— abnormal posture for this person specifically")
         elif trigger == "inactivity":
             return (f"No movement for {inactive:.0f}s "
                     f"(recline={recline:.0%})")
@@ -41,6 +47,8 @@ def _build_cause(state: str, analysis: SleepAnalysis) -> str:
         parts = []
         if perclos is not None and perclos >= 0.10:
             parts.append(f"PERCLOS={perclos:.0%} eye closure")
+        if max_z is not None and max_z >= 2.0:
+            parts.append(f"{z_trigger} z={max_z:.1f}σ above baseline")
         if inactive >= 5:
             parts.append(f"still {inactive:.0f}s")
         if head_drop and head_drop >= 15:
@@ -184,6 +192,7 @@ class FatigueEngine:
                 duration         = duration,
                 signals          = analysis.signals,
                 ear_result       = analysis.ear,
+                z_result         = analysis.z_score,
             )
             summary_str = risk.to_summary_str()
 

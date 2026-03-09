@@ -68,6 +68,7 @@ def compute_risk(
     duration:         float,
     signals:          Optional[dict] = None,
     ear_result=None,         # EARResult or None
+    z_result=None,           # ZScoreResult or None
 ) -> RiskScore:
     """
     Compute risk score from all available signals at event time.
@@ -146,6 +147,27 @@ def compute_risk(
         total += bonus
         if spine >= 45:
             factors.append(f"Spine tilted {spine:.0f}° from vertical")
+
+    # ── Z-score baseline deviation (weight 0.20 additive) ─────────────
+    # When a person's own baseline is available, their personal deviation
+    # carries significant evidential weight — it adapts to individual norms.
+    if z_result is not None and z_result.baseline_ready:
+        max_z = z_result.max_z
+        if max_z >= 2.0:
+            # Scale: 2σ = 0.08 contribution, 4σ = 0.20 (capped)
+            z_contribution = min(0.20, (max_z - 2.0) / 10.0 + 0.08)
+            sig_scores["z_score"] = round(z_contribution * 100, 1)
+            total += z_contribution
+            z_sig = z_result.triggered_signal or "posture"
+            if max_z >= 3.0:
+                factors.append(
+                    f"{z_sig} is {max_z:.1f}σ above this person's normal "
+                    f"(personal baseline — {z_result.samples_collected} samples)"
+                )
+            else:
+                factors.append(
+                    f"{z_sig} {max_z:.1f}σ above personal baseline"
+                )
 
     # ── Final score ───────────────────────────────────────────────────
     # Clip and scale to 0–100, bias upward for confirmed fatigue type

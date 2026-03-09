@@ -16,6 +16,7 @@ from app.config import (
 )
 from app.detection.body_signals import extract_body_signals
 from app.detection.ear_integrator import EARIntegrator, EARResult
+from app.detection.zscore_baseline import PersonBaseline, ZScoreResult
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class SleepAnalysis:
     debug:            dict  = field(default_factory=dict)
     signals:          dict  = field(default_factory=dict)  # raw body signals
     ear:              object = None   # EARResult — None if face not visible
+    z_score:          object = None   # ZScoreResult — None until baseline ready
 
 
 class MotionDetector:
@@ -165,6 +167,9 @@ class SleepPoseDetector:
         # EAR / PERCLOS tracker
         self._ear = EARIntegrator()
 
+        # Per-person adaptive baseline (z-score anomaly detection)
+        self._baseline = PersonBaseline()
+
         # Per-signal smoothers
         self._sm_head_drop  = SignalSmoother(_SMOOTH_WINDOW)
         self._sm_head_tilt  = SignalSmoother(_SMOOTH_WINDOW)
@@ -225,6 +230,35 @@ class SleepPoseDetector:
         sleep_by_ear  = ear_result.sleep_by_ear   if ear_result else False
         drowsy_by_ear = ear_result.drowsy_by_ear  if ear_result else False
 
+        # ── Z-score baseline: update or compute ───────────────────────
+        # Build signals dict for baseline (use raw unsmoothed values for
+        # better statistical accuracy — smoothed values reduce variance
+        # artificially and make the baseline too tight).
+        baseline_signals = {
+            "head_drop_angle":    raw_sigs.get("head_drop_angle"),
+            "spine_angle":        raw_sigs.get("spine_angle"),
+            "head_tilt_angle":    raw_sigs.get("head_tilt_angle"),
+            "shoulder_ear_ratio": raw_sigs.get("shoulder_ear_ratio"),
+            "wrist_activity":     raw_sigs.get("wrist_activity"),
+        }
+
+        # Only update baseline during clearly awake + active periods.
+        # Freeze learning when wrist is idle — idle sitting might be
+        # early fatigue and shouldn't be treated as "normal".
+        _is_clearly_awake = (
+            wrist_active                    # hands moving = working
+            and inactive_secs < DROWSY_SECONDS  # not sitting too still
+            and not clearly_reclined        # not leaning back
+        )
+        if _is_clearly_awake:
+            self._baseline.update_awake(baseline_signals)
+
+        z_result = self._baseline.compute_z_scores(baseline_signals)
+
+        # Z-score fatigue signals (only used when baseline is ready)
+        z_drowsy_sig  = z_result.z_drowsy   if z_result.baseline_ready else False
+        z_sleep_sig   = z_result.z_sleeping  if z_result.baseline_ready else False
+
         # ── Multi-signal sleeping detection ───────────────────────────
         sleep_by_inactivity = inactive_secs >= SLEEP_SECONDS
         sleep_by_recline    = clearly_reclined and inactive_secs >= SLEEP_SECONDS_RECLINED
@@ -257,7 +291,8 @@ class SleepPoseDetector:
         sleeping = (
             sleep_by_inactivity or sleep_by_recline or
             sleep_by_head_drop  or sleep_by_head_tilt or sleep_by_spine or
-            sleep_by_ear        # PERCLOS >= 40% = strong sleep signal
+            sleep_by_ear        or                   # PERCLOS >= 40%
+            (z_sleep_sig and not wrist_active)       # z-score: 3σ above personal norm
         ) and not wrist_active
 
         # ── Multi-signal drowsy detection ─────────────────────────────
@@ -284,7 +319,8 @@ class SleepPoseDetector:
                 drowsy_by_inactivity_alone   or
                 drowsy_by_head_drop          or
                 drowsy_by_spine              or
-                drowsy_by_ear               # PERCLOS >= 15%
+                drowsy_by_ear               or  # PERCLOS >= 15%
+                z_drowsy_sig                    # 2σ above personal norm
             ) and not wrist_active
         )
 
@@ -294,11 +330,12 @@ class SleepPoseDetector:
             signals_firing = sum([
                 sleep_by_inactivity, sleep_by_recline,
                 sleep_by_head_drop, sleep_by_head_tilt,
-                sleep_by_spine, sleep_by_ear
+                sleep_by_spine, sleep_by_ear, z_sleep_sig
             ])
             confidence = min(1.0, 0.5 + signals_firing * 0.15)
             trigger    = (
                 "perclos"    if sleep_by_ear       else
+                "z_score"    if z_sleep_sig        else
                 "head_drop"  if sleep_by_head_drop else
                 "head_tilt"  if sleep_by_head_tilt else
                 "spine"      if sleep_by_spine     else
@@ -314,6 +351,7 @@ class SleepPoseDetector:
             confidence = min(1.0, 0.35 + signals_firing * 0.2)
             trigger    = (
                 "perclos"   if drowsy_by_ear       else
+                "z_score"   if z_drowsy_sig        else
                 "head_drop" if drowsy_by_head_drop else
                 "spine"     if drowsy_by_spine     else
                 "drowsy"
@@ -334,11 +372,19 @@ class SleepPoseDetector:
             pose_visible=True,
             pose_landmarks=lms,
             ear=ear_result,
+            z_score=z_result,
             signals={
                 # EAR / PERCLOS
                 "perclos":            ear_result.perclos     if ear_result and ear_result.face_found else None,
                 "ear":                ear_result.ear         if ear_result and ear_result.face_found else None,
                 "eyes_closed":        ear_result.eyes_closed if ear_result and ear_result.face_found else None,
+                # Z-score baseline
+                "z_max":              z_result.max_z             if z_result.baseline_ready else None,
+                "z_head_drop":        z_result.z_scores.get("head_drop_angle") if z_result.baseline_ready else None,
+                "z_spine":            z_result.z_scores.get("spine_angle")     if z_result.baseline_ready else None,
+                "z_baseline_ready":   z_result.baseline_ready,
+                "z_samples":          z_result.samples_collected,
+                "z_triggered":        z_result.triggered_signal  if z_result.baseline_ready else None,
                 # Fatigue signals (smoothed)
                 "head_drop_angle":    head_drop,
                 "head_tilt_angle":    head_tilt,

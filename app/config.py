@@ -115,3 +115,16 @@ REID_MATCH_THRESHOLD   = _float("REID_MATCH_THRESHOLD",   "0.82")  # cosine simi
 REID_GALLERY_TIMEOUT   = _float("REID_GALLERY_TIMEOUT",   "300.0") # 5 min memory
 REID_EMB_HISTORY       = _int("REID_EMB_HISTORY",          "5")    # avg last N embeddings
 REID_UPDATE_EVERY_FRAMES = _int("REID_UPDATE_EVERY_FRAMES","15")   # update freq (frames)
+
+# ── Per-person Z-score baseline (anomaly detection) ───────────────────────────
+# Drowsy if signal > Z_DROWSY_THRESHOLD standard deviations above personal norm
+Z_DROWSY_THRESHOLD  = _float("Z_DROWSY_THRESHOLD",  "2.0")
+# Sleeping if signal > Z_SLEEP_THRESHOLD standard deviations above personal norm
+Z_SLEEP_THRESHOLD   = _float("Z_SLEEP_THRESHOLD",   "3.0")
+# Frames of confirmed-awake activity needed before z-score is used
+# At ~0.5 pose fps per person crop: 150 frames ≈ 5 minutes of active work
+ZSCORE_WARMUP_FRAMES = _int("ZSCORE_WARMUP_FRAMES",  "150")
+# Minimum std dev floor — prevents over-sensitivity when person is very still
+ZSCORE_MIN_STD      = _float("ZSCORE_MIN_STD",       "2.0")
+# EMA alpha for slow baseline drift (0.02 = very slow adaptation)
+ZSCORE_EMA_ALPHA    = _float("ZSCORE_EMA_ALPHA",     "0.02")
