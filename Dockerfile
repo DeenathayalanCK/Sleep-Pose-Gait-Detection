@@ -30,4 +30,6 @@ COPY . .
 ENV MEDIAPIPE_DISABLE_GPU=1
 ENV OMP_NUM_THREADS=2
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --workers 2: one worker keeps /stream alive, second serves /status /events without queuing
+# --timeout-keep-alive 120: MJPEG connections must not be killed by idle timeout
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--timeout-keep-alive", "120", "--log-level", "warning"]

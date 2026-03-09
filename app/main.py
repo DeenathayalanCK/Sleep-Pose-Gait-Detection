@@ -22,48 +22,54 @@ from app.utils.annotator import draw_person, draw_global_overlay
 setup_logger()
 logger = logging.getLogger(__name__)
 
-# Global status — list of per-person dicts for /status endpoint
-current_persons: dict = {}   # track_id → status dict
+current_persons: dict = {}
 
 
 def monitor():
     logger.info("Multi-person monitoring started.")
 
-    video        = VideoReader()
-    tracker      = PersonTracker()
-    track_mgr    = TrackManager()
+    video      = VideoReader()          # now runs its own background capture thread
+    tracker    = PersonTracker()
+    track_mgr  = TrackManager()
 
-    frame_time   = time.monotonic()
+    # ── FPS tracking for diagnostics ─────────────────────────────────
+    fps_counter = 0
+    fps_timer   = time.monotonic()
+    processing_fps = 0.0
+
+    # ── KEY FIX: frame deduplication ─────────────────────────────────
+    # Don't process the same frame twice. If VideoReader hasn't produced
+    # a new frame yet (processing is faster than capture), skip and wait.
+    last_frame_id = id(None)
 
     while True:
         try:
             frame = video.read()
+
+            # No frame available yet — yield CPU, don't spin
             if frame is None:
-                time.sleep(0.03)
+                time.sleep(0.005)
                 continue
 
-            now = time.monotonic()
-            dt  = now - frame_time
-            frame_time = now
+            # Skip if this is the exact same frame object as last iteration
+            # (processing loop ran faster than capture thread)
+            fid = id(frame)
+            if fid == last_frame_id:
+                time.sleep(0.005)
+                continue
+            last_frame_id = fid
 
-            frame = cv2.resize(frame, (FRAME_WIDTH, FRAME_HEIGHT))
-
-            # ── Detect + track all persons ────────────────────────────────
+            # ── Detect + track ────────────────────────────────────────
             persons = tracker.update(frame)
 
-            # ── Per-person pose + state + event management ────────────────
+            # ── Per-person pose analysis ──────────────────────────────
             annotated = frame.copy()
 
-            # First pass: draw global header
-            # (person_states not yet populated — draw after second pass)
-
-            # Build partial annotated with per-person drawings
             person_states = track_mgr.update(
                 persons, frame, annotated_frame=annotated
             )
 
-            # Draw per-person boxes + skeletons + labels
-            # We need bbox from the tracker result — build a lookup
+            # ── Draw annotations ──────────────────────────────────────
             bbox_by_id = {p.track_id: p for p in persons}
             for tid, ps in person_states.items():
                 p = bbox_by_id.get(tid)
@@ -77,26 +83,47 @@ def monitor():
                         pose_landmarks=ps.analysis.pose_landmarks,
                     )
 
-            # Draw global header bar
+            # ── FPS overlay ───────────────────────────────────────────
+            fps_counter += 1
+            elapsed = time.monotonic() - fps_timer
+            if elapsed >= 2.0:
+                processing_fps = fps_counter / elapsed
+                fps_counter    = 0
+                fps_timer      = time.monotonic()
+
             draw_global_overlay(annotated, person_states, CAMERA_ID)
 
-            # ── Update global status dict ─────────────────────────────────
+            # Burn processing FPS into frame so you can monitor it live
+            cv2.putText(
+                annotated,
+                f"{processing_fps:.1f} fps",
+                (FRAME_WIDTH - 80, FRAME_HEIGHT - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.38,
+                (80, 80, 80), 1, cv2.LINE_AA,
+            )
+
+            # ── Update /status ────────────────────────────────────────
             current_persons.clear()
             for tid, ps in person_states.items():
                 current_persons[str(tid)] = {
-                    "track_id":        tid,
-                    "state":           ps.state,
-                    "confidence":      ps.analysis.confidence,
-                    "inactive_seconds":ps.analysis.inactive_seconds,
-                    "reclined_ratio":  ps.analysis.reclined_ratio,
-                    "motion_score":    ps.analysis.motion_score,
-                    "pose_visible":    ps.analysis.pose_visible,
-                    "updated_at":      datetime.datetime.now().isoformat(),
+                    "track_id":         tid,
+                    "state":            ps.state,
+                    "confidence":       ps.analysis.confidence,
+                    "inactive_seconds": ps.analysis.inactive_seconds,
+                    "reclined_ratio":   ps.analysis.reclined_ratio,
+                    "motion_score":     ps.analysis.motion_score,
+                    "pose_visible":     ps.analysis.pose_visible,
+                    "signals":          ps.analysis.signals,
+                    "updated_at":       datetime.datetime.now().isoformat(),
                 }
 
-            # ── Push annotated frame to MJPEG stream ──────────────────────
-            _, jpeg = cv2.imencode(".jpg", annotated,
-                                   [cv2.IMWRITE_JPEG_QUALITY, 72])
+            # ── Push to MJPEG stream ──────────────────────────────────
+            # JPEG quality 75 — good balance of quality vs bandwidth.
+            # Lower this to 60 if stream is choppy on slow networks.
+            _, jpeg = cv2.imencode(
+                ".jpg", annotated,
+                [cv2.IMWRITE_JPEG_QUALITY, 75]
+            )
             latest_frame.write(jpeg.tobytes())
 
         except Exception as e:
