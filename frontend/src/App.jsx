@@ -4,8 +4,13 @@ import LiveStatus from "./components/LiveStatus";
 import PersonList from "./components/PersonList";
 import Events from "./components/Events";
 import Calibration from "./components/Calibration";
+import Evaluate from "./components/Evaluate";
 
-const TABS = ["Live", "Records", "Persons", "Calibrate"];
+const TABS = ["Live", "Records", "Persons", "Calibrate", "Evaluate"];
+
+const TAB_ACCENT = {
+  Evaluate: "#00bcd4",
+};
 
 export default function App() {
   const [tab, setTab] = useState("Live");
@@ -30,25 +35,33 @@ export default function App() {
           paddingBottom: 12,
         }}
       >
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              background: tab === t ? "#1a1a1a" : "transparent",
-              border: `1px solid ${tab === t ? "#444" : "#1a1a1a"}`,
-              borderRadius: 6,
-              padding: "6px 18px",
-              cursor: "pointer",
-              color: tab === t ? "#eee" : "#444",
-              fontSize: 11,
-              fontFamily: "monospace",
-              letterSpacing: 2,
-            }}
-          >
-            {t.toUpperCase()}
-          </button>
-        ))}
+        {TABS.map((t) => {
+          const accent = TAB_ACCENT[t];
+          const active = tab === t;
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                background: active
+                  ? accent
+                    ? accent + "18"
+                    : "#1a1a1a"
+                  : "transparent",
+                border: `1px solid ${active ? accent || "#444" : "#1a1a1a"}`,
+                borderRadius: 6,
+                padding: "6px 18px",
+                cursor: "pointer",
+                color: active ? accent || "#eee" : "#444",
+                fontSize: 11,
+                fontFamily: "monospace",
+                letterSpacing: 2,
+              }}
+            >
+              {t.toUpperCase()}
+            </button>
+          );
+        })}
       </div>
 
       {tab === "Live" && (
@@ -60,7 +73,7 @@ export default function App() {
         </div>
       )}
 
-      {tab === "Records" && (
+      {["Records", "Persons", "Calibrate", "Evaluate"].includes(tab) && (
         <div
           style={{
             background: "#0a0a0a",
@@ -69,33 +82,10 @@ export default function App() {
             padding: "20px 24px",
           }}
         >
-          <Events />
-        </div>
-      )}
-
-      {tab === "Persons" && (
-        <div
-          style={{
-            background: "#0a0a0a",
-            border: "1px solid #1a1a1a",
-            borderRadius: 12,
-            padding: "20px 24px",
-          }}
-        >
-          <PersonList />
-        </div>
-      )}
-
-      {tab === "Calibrate" && (
-        <div
-          style={{
-            background: "#0a0a0a",
-            border: "1px solid #1a1a1a",
-            borderRadius: 12,
-            padding: "20px 24px",
-          }}
-        >
-          <Calibration />
+          {tab === "Records" && <Events />}
+          {tab === "Persons" && <PersonList />}
+          {tab === "Calibrate" && <Calibration />}
+          {tab === "Evaluate" && <Evaluate />}
         </div>
       )}
     </div>
