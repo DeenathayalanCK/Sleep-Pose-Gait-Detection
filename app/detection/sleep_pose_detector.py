@@ -260,8 +260,23 @@ class SleepPoseDetector:
         z_sleep_sig   = z_result.z_sleeping  if z_result.baseline_ready else False
 
         # ── Multi-signal sleeping detection ───────────────────────────
-        sleep_by_inactivity = inactive_secs >= SLEEP_SECONDS
-        sleep_by_recline    = clearly_reclined and inactive_secs >= SLEEP_SECONDS_RECLINED
+        # sleep_by_inactivity: stillness alone is NOT enough for a seated person.
+        # Someone focused at their screen can easily be still for 15–30s.
+        # Require EITHER:
+        #   a) reclined + still >= SLEEP_SECONDS_RECLINED  (handled by sleep_by_recline)
+        #   b) still for an extended window (3× SLEEP_SECONDS = 45s) with no other activity
+        # This eliminates the most common false positive: focused seated workers.
+        sleep_by_inactivity = (
+            inactive_secs >= SLEEP_SECONDS * 3.0   # 45s still with no wrist = very suspicious
+            and not wrist_active                    # explicit wrist idle check here too
+        )
+        # Recline + inactivity: requires meaningful recline (not just slightly leaned)
+        # and wrist idle — a person stretching back to think still moves their hands
+        sleep_by_recline    = (
+            clearly_reclined
+            and inactive_secs >= SLEEP_SECONDS_RECLINED
+            and not wrist_active
+        )
         # Head drop sleeping: requires HIGH angle + LONG inactivity + corroboration
         # Top-angle cameras produce inflated head_drop values for forward lean.
         # Require at least one other signal to confirm it's sleep, not reading.
@@ -288,24 +303,59 @@ class SleepPoseDetector:
             and inactive_secs >= DROWSY_SECONDS
         )
 
-        sleeping = (
-            sleep_by_inactivity or sleep_by_recline or
-            sleep_by_head_drop  or sleep_by_head_tilt or sleep_by_spine or
-            sleep_by_ear        or                   # PERCLOS >= 40%
-            (z_sleep_sig and not wrist_active)       # z-score: 3σ above personal norm
-        ) and not wrist_active
+        # ── SLEEPING: requires >= 2 independent signals simultaneously ──────
+        #
+        # CORE PRINCIPLE: No single signal is reliable enough alone on a
+        # top-angle office camera. A focused worker can trigger any one of
+        # them independently (still for 45s, head forward, slightly reclined).
+        # Two signals firing at the same time is a qualitatively different
+        # situation — the probability of two independent false signals
+        # coinciding is the product of their individual false positive rates.
+        #
+        # Signals are grouped by independence:
+        #   Group A — body posture/position signals
+        #   Group B — physiological signals (eyes, face)
+        #   Group C — personal baseline anomaly
+        #
+        # SLEEPING requires: EITHER (2+ from Group A) OR (1 from A + 1 from B/C)
+        # Exception: EAR/PERCLOS alone is strong enough (direct physiological)
 
-        # ── Multi-signal drowsy detection ─────────────────────────────
+        _sleep_posture_signals = sum([
+            sleep_by_inactivity,    # 45s still + wrist idle
+            sleep_by_recline,       # clearly reclined + still + wrist idle
+            sleep_by_head_drop,     # head 55°+ + inactivity + corroborated
+            sleep_by_head_tilt,     # lateral lean 35°+ + inactivity
+            sleep_by_spine,         # spine 50°+ + inactivity
+        ])
+        _sleep_physio_signals = sum([
+            sleep_by_ear,           # PERCLOS >= 40% (direct eye closure)
+            z_sleep_sig,            # 3σ above personal baseline
+        ])
+
+        sleeping = (
+            not wrist_active and (
+                sleep_by_ear                                         # PERCLOS alone is enough
+                or (_sleep_posture_signals >= 2)                     # 2+ posture signals
+                or (_sleep_posture_signals >= 1 and _sleep_physio_signals >= 1)  # 1 posture + 1 physio
+            )
+        )
+
+        # ── DROWSY: requires >= 2 independent signals simultaneously ──────────
+        #
+        # Same principle. Drowsy threshold is lower than sleeping but still
+        # requires corroboration. A single signal alone = noise, not a finding.
+
         drowsy_by_inactivity_recline = (
             inactive_secs >= DROWSY_SECONDS and somewhat_reclined
         )
-        drowsy_by_inactivity_alone = inactive_secs >= DROWSY_SECONDS * 1.5
-        # Drowsy head drop: wrist must be idle — typing with head forward is normal
+        drowsy_by_inactivity_alone = (
+            inactive_secs >= DROWSY_SECONDS * 2.5   # 20s still
+        )
         drowsy_by_head_drop = (
             head_drop is not None
             and head_drop >= _HEAD_DROP_DROWSY
-            and inactive_secs >= DROWSY_SECONDS          # full drowsy window, not half
-            and _wrist_idle                              # not typing
+            and inactive_secs >= DROWSY_SECONDS
+            and _wrist_idle
         )
         drowsy_by_spine = (
             spine_ang is not None
@@ -313,25 +363,31 @@ class SleepPoseDetector:
             and inactive_secs >= DROWSY_SECONDS * 0.5
         )
 
+        _drowsy_posture_signals = sum([
+            drowsy_by_inactivity_recline,
+            drowsy_by_inactivity_alone,
+            drowsy_by_head_drop,
+            drowsy_by_spine,
+        ])
+        _drowsy_physio_signals = sum([
+            drowsy_by_ear,          # PERCLOS >= 15%
+            z_drowsy_sig,           # 2σ above personal baseline
+        ])
+
         drowsy = (
-            not sleeping and (
-                drowsy_by_inactivity_recline or
-                drowsy_by_inactivity_alone   or
-                drowsy_by_head_drop          or
-                drowsy_by_spine              or
-                drowsy_by_ear               or  # PERCLOS >= 15%
-                z_drowsy_sig                    # 2σ above personal norm
-            ) and not wrist_active
+            not sleeping
+            and not wrist_active
+            and (
+                drowsy_by_ear                                           # PERCLOS alone is enough
+                or (_drowsy_posture_signals >= 2)                       # 2+ posture signals
+                or (_drowsy_posture_signals >= 1 and _drowsy_physio_signals >= 1)  # 1 posture + 1 physio
+            )
         )
 
         # ── Confidence scoring ────────────────────────────────────────
         if sleeping:
             # More signals firing = higher confidence
-            signals_firing = sum([
-                sleep_by_inactivity, sleep_by_recline,
-                sleep_by_head_drop, sleep_by_head_tilt,
-                sleep_by_spine, sleep_by_ear, z_sleep_sig
-            ])
+            signals_firing = _sleep_posture_signals + _sleep_physio_signals
             confidence = min(1.0, 0.5 + signals_firing * 0.15)
             trigger    = (
                 "perclos"    if sleep_by_ear       else
@@ -345,9 +401,7 @@ class SleepPoseDetector:
             state = "sleeping"
 
         elif drowsy:
-            signals_firing = sum([
-                drowsy_by_inactivity_recline, drowsy_by_head_drop, drowsy_by_spine
-            ])
+            signals_firing = _drowsy_posture_signals + _drowsy_physio_signals
             confidence = min(1.0, 0.35 + signals_firing * 0.2)
             trigger    = (
                 "perclos"   if drowsy_by_ear       else

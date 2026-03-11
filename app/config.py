@@ -15,6 +15,8 @@ FRAME_HEIGHT  = _int("FRAME_HEIGHT", "480")
 
 # ── Storage ────────────────────────────────────────────────────────────────────
 DATABASE_PATH = _str("DATABASE_PATH", "data/database/events.db")
+# PostgreSQL connection URL — overrides SQLite when set
+DATABASE_URL  = _str("DATABASE_URL",  "")   # e.g. postgresql://user:pass@db:5432/fatigue
 SNAPSHOT_DIR  = _str("SNAPSHOT_DIR",  "data/snapshots")
 
 # ── LLM ───────────────────────────────────────────────────────────────────────

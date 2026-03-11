@@ -238,6 +238,12 @@ export default function Calibration() {
 
   const computeThresholds = async () => {
     try {
+      if ((counts["sitting"] || 0) < 3 || (counts["standing"] || 0) < 3) {
+        setMessage(
+          "⚠ Need at least 3 sitting AND 3 standing samples before computing.",
+        );
+        return;
+      }
       setMessage("Computing thresholds from samples…");
       const r = await axios.post(`${API}/calibrate/compute`);
       if (r.data.error) {
@@ -490,6 +496,9 @@ export default function Calibration() {
           <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={computeThresholds}
+              disabled={
+                (counts["sitting"] || 0) < 3 || (counts["standing"] || 0) < 3
+              }
               disabled={!ready}
               style={{
                 background: ready ? "#00e67614" : "#0a0a0a",

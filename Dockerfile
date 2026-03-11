@@ -4,6 +4,7 @@ WORKDIR /app
 
 # System deps for OpenCV + MediaPipe
 RUN apt-get update && apt-get install -y \
+    curl \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
@@ -22,6 +23,9 @@ RUN pip install --no-cache-dir \
 # Step 2: Install everything else (ultralytics will see torch already installed)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# PostgreSQL client lib
+RUN pip install --no-cache-dir psycopg2-binary
 
 # Step 3: Copy application code
 COPY . .

@@ -1,6 +1,12 @@
+"""
+repository.py — All DB read/write operations.
+Unchanged functions kept identical. New functions added for
+ground truth labels and evaluation queries.
+"""
 import logging
+import datetime
 from app.database.db import SessionLocal
-from app.database.models import FatigueEvent, PersonSession
+from app.database.models import FatigueEvent, PersonSession, GroundTruthLabel
 
 logger = logging.getLogger(__name__)
 
@@ -95,5 +101,92 @@ def get_all_events():
     db = SessionLocal()
     try:
         return db.query(FatigueEvent).order_by(FatigueEvent.id.desc()).all()
+    finally:
+        db.close()
+
+
+# ── GroundTruthLabel ──────────────────────────────────────────────────────────
+
+def insert_ground_truth(event_id, person_id, camera_id, label_type,
+                        fatigue_type, started_at, ended_at=None,
+                        duration=None, notes=None, labelled_by=None,
+                        detection_lag=None) -> "GroundTruthLabel | None":
+    """
+    Insert a human label for an event.
+      label_type: "TP" | "FP" | "FN"
+      event_id:   FK to fatigue_events (None for FN — system never fired)
+      detection_lag: seconds from real onset to system alert (for TP only)
+    """
+    db = SessionLocal()
+    try:
+        now = datetime.datetime.now().isoformat(sep=" ", timespec="seconds")
+        row = GroundTruthLabel(
+            event_id      = event_id,
+            person_id     = person_id,
+            camera_id     = camera_id,
+            label_type    = label_type,
+            fatigue_type  = fatigue_type,
+            started_at    = started_at,
+            ended_at      = ended_at,
+            duration      = duration,
+            notes         = notes,
+            labelled_by   = labelled_by,
+            labelled_at   = now,
+            detection_lag = detection_lag,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+    except Exception as e:
+        db.rollback()
+        logger.error(f"insert_ground_truth: {e}")
+        return None
+    finally:
+        db.close()
+
+
+def get_all_labels(camera_id=None):
+    db = SessionLocal()
+    try:
+        q = db.query(GroundTruthLabel).order_by(GroundTruthLabel.id.desc())
+        if camera_id:
+            q = q.filter(GroundTruthLabel.camera_id == camera_id)
+        return q.all()
+    finally:
+        db.close()
+
+
+def delete_label(label_id: int) -> bool:
+    db = SessionLocal()
+    try:
+        row = db.query(GroundTruthLabel).filter(
+            GroundTruthLabel.id == label_id
+        ).first()
+        if row:
+            db.delete(row)
+            db.commit()
+            return True
+        return False
+    except Exception as e:
+        db.rollback()
+        logger.error(f"delete_label: {e}")
+        return False
+    finally:
+        db.close()
+
+
+def get_unlabelled_events(camera_id=None):
+    """Return FatigueEvents that have no ground truth label yet."""
+    db = SessionLocal()
+    try:
+        labelled_ids = {
+            r.event_id for r in db.query(GroundTruthLabel.event_id).all()
+            if r.event_id is not None
+        }
+        q = db.query(FatigueEvent).order_by(FatigueEvent.id.desc())
+        if camera_id:
+            q = q.filter(FatigueEvent.camera_id == camera_id)
+        return [e for e in q.all() if e.id not in labelled_ids]
     finally:
         db.close()

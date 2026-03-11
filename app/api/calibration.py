@@ -97,7 +97,14 @@ def compute_thresholds():
     """
     counts = {k: len(v) for k, v in _SAMPLES.items()}
     if counts["sitting"] < 3 or counts["standing"] < 3:
-        raise HTTPException(status_code=400, detail="Need at least 3 sitting + 3 standing samples first.")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Need at least 3 sitting + 3 standing samples. "
+                f"Currently: sitting={counts['sitting']}, standing={counts['standing']}. "
+                f"Use the Calibrate tab to capture samples first."
+            )
+        )
 
     thresholds = {}
     notes      = []

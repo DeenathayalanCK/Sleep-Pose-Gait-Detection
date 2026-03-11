@@ -1,4 +1,12 @@
-from sqlalchemy import Column, Integer, Float, Text
+"""
+models.py — All SQLAlchemy ORM models.
+
+Tables:
+  person_sessions  — per-person session tracking (existing)
+  fatigue_events   — detected sleep/drowsy episodes (existing)
+  ground_truth_labels — human-labelled ground truth for evaluation (NEW)
+"""
+from sqlalchemy import Column, Integer, Float, Text, Boolean, Index
 from app.database.db import Base
 
 
@@ -27,31 +35,26 @@ class PersonSession(Base):
 
 class FatigueEvent(Base):
     """
-    Replaces SleepEvent. Covers sleeping AND drowsy episodes.
-
-    fatigue_type:  "sleeping" | "drowsy"
-    fatigue_cause: human-readable explanation of WHY this record was created.
-                   e.g. "Inactive 18s with reclined posture"
-                        "No movement detected for 15s"
-                        "Drowsy: still for 9s + reclined posture"
+    Detected fatigue episode. fatigue_type = sleeping | drowsy.
+    summary now stores structured risk score string (not LLM output).
     """
     __tablename__ = "fatigue_events"
 
     id               = Column(Integer, primary_key=True, autoincrement=True)
-    person_id        = Column(Integer, nullable=True)
-    camera_id        = Column(Text,    nullable=False)
-    fatigue_type     = Column(Text,    nullable=False)   # "sleeping" | "drowsy"
-    fatigue_cause    = Column(Text,    nullable=True)    # why this was created
-    started_at       = Column(Text,    nullable=False)
+    person_id        = Column(Integer, nullable=True,  index=True)
+    camera_id        = Column(Text,    nullable=False,  index=True)
+    fatigue_type     = Column(Text,    nullable=False)
+    fatigue_cause    = Column(Text,    nullable=True)
+    started_at       = Column(Text,    nullable=False,  index=True)
     ended_at         = Column(Text,    nullable=True)
     duration         = Column(Float,   nullable=False)
-    trigger          = Column(Text,    nullable=True)    # "inactivity"|"recline"|"drowsy"
+    trigger          = Column(Text,    nullable=True)
     reclined_ratio   = Column(Float,   nullable=True)
     inactive_seconds = Column(Float,   nullable=True)
     confidence       = Column(Float,   nullable=True)
-    snapshot         = Column(Text,    nullable=True)    # full annotated frame path
-    crop_snapshot    = Column(Text,    nullable=True)    # cropped person thumbnail path
-    summary          = Column(Text,    nullable=True)    # LLM summary
+    snapshot         = Column(Text,    nullable=True)
+    crop_snapshot    = Column(Text,    nullable=True)
+    summary          = Column(Text,    nullable=True)
 
     def to_dict(self):
         return {
@@ -70,4 +73,59 @@ class FatigueEvent(Base):
             "snapshot":         self.snapshot,
             "crop_snapshot":    self.crop_snapshot,
             "summary":          self.summary,
+        }
+
+
+class GroundTruthLabel(Base):
+    """
+    Human-labelled ground truth for evaluation metrics.
+
+    Workflow:
+      1. Reviewer watches the Records tab snapshot/crop
+      2. For each detected event: marks it TRUE_POSITIVE or FALSE_POSITIVE
+      3. For missed real events: adds a FALSE_NEGATIVE record manually
+      4. Evaluation module reads these labels to compute precision/recall/F1
+
+    label_type:
+      "TP" — system detected it, reviewer confirms it was real
+      "FP" — system detected it, reviewer says it was wrong
+      "FN" — system missed it, reviewer adds it manually
+    """
+    __tablename__ = "ground_truth_labels"
+
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    event_id       = Column(Integer, nullable=True,  index=True)
+                     # FK to fatigue_events.id (nullable for FN entries)
+    person_id      = Column(Integer, nullable=True)
+    camera_id      = Column(Text,    nullable=False)
+    label_type     = Column(Text,    nullable=False)  # "TP" | "FP" | "FN"
+    fatigue_type   = Column(Text,    nullable=False)  # "sleeping" | "drowsy"
+    started_at     = Column(Text,    nullable=False)  # actual event start
+    ended_at       = Column(Text,    nullable=True)
+    duration       = Column(Float,   nullable=True)   # actual duration (seconds)
+    notes          = Column(Text,    nullable=True)   # reviewer comments
+    labelled_by    = Column(Text,    nullable=True)   # reviewer name
+    labelled_at    = Column(Text,    nullable=True)   # when label was added
+    detection_lag  = Column(Float,   nullable=True)
+                     # seconds from actual onset to first system alert (latency)
+
+    __table_args__ = (
+        Index("ix_gtl_camera_type", "camera_id", "fatigue_type"),
+    )
+
+    def to_dict(self):
+        return {
+            "id":            self.id,
+            "event_id":      self.event_id,
+            "person_id":     self.person_id,
+            "camera_id":     self.camera_id,
+            "label_type":    self.label_type,
+            "fatigue_type":  self.fatigue_type,
+            "started_at":    self.started_at,
+            "ended_at":      self.ended_at,
+            "duration":      self.duration,
+            "notes":         self.notes,
+            "labelled_by":   self.labelled_by,
+            "labelled_at":   self.labelled_at,
+            "detection_lag": self.detection_lag,
         }
