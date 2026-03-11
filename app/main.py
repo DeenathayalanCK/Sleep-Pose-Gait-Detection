@@ -5,6 +5,7 @@ import cv2
 import time
 import logging
 import datetime
+from app.services.signal_logger import SignalLogger
 from contextlib import asynccontextmanager
 from threading import Thread
 
@@ -102,10 +103,22 @@ def monitor():
                 (80, 80, 80), 1, cv2.LINE_AA,
             )
 
+            # ── Log signals for ML training ───────────────────────────
+            try:
+                video_pos = reader._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+            except Exception:
+                video_pos = None
+            for tid, ps in person_states.items():
+                if ps.analysis is not None:
+                    signal_logger.log(
+                        person_id=tid,
+                        analysis=ps.analysis,
+                        video_pos_sec=video_pos,
+                    )
+
             # ── Update /status ────────────────────────────────────────
             current_persons.clear()
             for tid, ps in person_states.items():
-                z = ps.analysis.z_score
                 current_persons[str(tid)] = {
                     "track_id":         tid,
                     "state":            ps.state,
@@ -115,12 +128,6 @@ def monitor():
                     "motion_score":     ps.analysis.motion_score,
                     "pose_visible":     ps.analysis.pose_visible,
                     "signals":          ps.analysis.signals,
-                    # Z-score baseline info (shown in Live status panel)
-                    "z_baseline_ready": z.baseline_ready         if z else False,
-                    "z_samples":        z.samples_collected      if z else 0,
-                    "z_max":            round(z.max_z, 2)        if z else None,
-                    "z_triggered":      z.triggered_signal       if z else None,
-                    "z_scores":         z.to_dict()["z_scores"]  if (z and z.baseline_ready) else {},
                     "updated_at":       datetime.datetime.now().isoformat(),
                 }
 
