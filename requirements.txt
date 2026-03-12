@@ -10,3 +10,6 @@ numpy
 aiofiles
 python-multipart
 ultralytics
+psycopg2-binary
+joblib
+scikit-learn

@@ -89,10 +89,16 @@ class VideoReader:
             if not ret:
                 consecutive_failures += 1
                 if consecutive_failures >= 5:
-                    # End of file (video loop) or stream dropout
-                    logger.warning("Read failure — rewinding/reconnecting")
-                    self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                    consecutive_failures = 0
+                    src = str(self._source)
+                    is_file = not (src.startswith("rtsp://") or src.startswith("rtmp://"))
+                    if is_file:
+                        logger.info("Video file ended — stopping signal logger.")
+                        self._stop.set()   # stop cleanly, no rewind
+                        break
+                    else:
+                        logger.warning("Stream dropout — reconnecting.")
+                        self._open()
+                        consecutive_failures = 0
                 time.sleep(0.01)
                 continue
 

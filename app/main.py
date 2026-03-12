@@ -27,6 +27,7 @@ current_persons: dict = {}
 
 
 def monitor():
+    signal_logger = SignalLogger()
     logger.info("Multi-person monitoring started.")
 
     video      = VideoReader()          # now runs its own background capture thread
@@ -105,7 +106,7 @@ def monitor():
 
             # ── Log signals for ML training ───────────────────────────
             try:
-                video_pos = reader._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+                video_pos = video._cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
             except Exception:
                 video_pos = None
             for tid, ps in person_states.items():
@@ -119,6 +120,7 @@ def monitor():
             # ── Update /status ────────────────────────────────────────
             current_persons.clear()
             for tid, ps in person_states.items():
+                z = ps.analysis.z_score
                 current_persons[str(tid)] = {
                     "track_id":         tid,
                     "state":            ps.state,
@@ -128,6 +130,12 @@ def monitor():
                     "motion_score":     ps.analysis.motion_score,
                     "pose_visible":     ps.analysis.pose_visible,
                     "signals":          ps.analysis.signals,
+                    # Z-score baseline — needed by LiveStatus z-score panel
+                    "z_baseline_ready": z.baseline_ready         if z else False,
+                    "z_samples":        z.samples_collected      if z else 0,
+                    "z_max":            round(z.max_z, 2)        if z else None,
+                    "z_triggered":      z.triggered_signal       if z else None,
+                    "z_scores":         z.to_dict()["z_scores"]  if (z and z.baseline_ready) else {},
                     "updated_at":       datetime.datetime.now().isoformat(),
                 }
 
