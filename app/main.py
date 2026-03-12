@@ -12,7 +12,7 @@ from threading import Thread
 from app.utils.logger import setup_logger
 from app.database.db import init_db
 from app.api.server import create_app
-from app.config import FRAME_WIDTH, FRAME_HEIGHT, CAMERA_ID
+from app.config import FRAME_WIDTH, FRAME_HEIGHT, CAMERA_ID, PROCESS_EVERY_N_FRAMES
 
 from app.camera.video_reader import VideoReader
 from app.camera.stream_frame import latest_frame
@@ -24,12 +24,6 @@ setup_logger()
 logger = logging.getLogger(__name__)
 
 current_persons: dict = {}
-_track_manager = None
-
-
-def get_track_manager():
-    """Called by reset-identities endpoint to access live TrackManager."""
-    return _track_manager
 
 
 def monitor():
@@ -39,8 +33,6 @@ def monitor():
     video      = VideoReader()          # now runs its own background capture thread
     tracker    = PersonTracker()
     track_mgr  = TrackManager()
-    global _track_manager
-    _track_manager = track_mgr
 
     # ── FPS tracking for diagnostics ─────────────────────────────────
     fps_counter = 0
@@ -51,6 +43,7 @@ def monitor():
     # Don't process the same frame twice. If VideoReader hasn't produced
     # a new frame yet (processing is faster than capture), skip and wait.
     last_frame_id = id(None)
+    frame_counter = 0  # counts every captured frame
 
     while True:
         try:
@@ -68,6 +61,15 @@ def monitor():
                 time.sleep(0.005)
                 continue
             last_frame_id = fid
+
+            # ── Frame skip: only analyse every Nth frame ─────────────
+            frame_counter += 1
+            if frame_counter % PROCESS_EVERY_N_FRAMES != 0:
+                # Push raw frame to live stream so video stays smooth
+                ret2, jpeg2 = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                if ret2:
+                    latest_frame.write(jpeg2.tobytes())
+                continue
 
             # ── Detect + track ────────────────────────────────────────
             persons = tracker.update(frame)

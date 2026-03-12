@@ -135,3 +135,9 @@ ZSCORE_EMA_ALPHA    = _float("ZSCORE_EMA_ALPHA",     "0.02")
 IDLE_SECONDS         = _float("IDLE_SECONDS",          "120.0")
 # Cooldown between idle alerts for the same person (seconds)
 IDLE_COOLDOWN_SECONDS = _float("IDLE_COOLDOWN_SECONDS", "300.0")
+
+# ── Frame processing rate ─────────────────────────────────────────────────────
+# Process 1 out of every N captured frames for YOLO+MediaPipe analysis.
+# Captured frames still flow to live stream at full camera FPS (smooth video).
+# Recommended: 2-4 for CPU-only. Higher = faster but less frequent detection.
+PROCESS_EVERY_N_FRAMES = _int("PROCESS_EVERY_N_FRAMES", "3")
