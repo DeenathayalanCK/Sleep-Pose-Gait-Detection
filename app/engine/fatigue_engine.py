@@ -199,6 +199,16 @@ class FatigueEngine:
                 self._last_idle_alert = now
                 cause = (f"Sitting idle for {inactive_secs:.0f}s — "
                          f"no movement detected (awake but inactive)")
+                # Save snapshot for idle events same as sleeping/drowsy
+                idle_full_snap = idle_crop_snap = None
+                if snapshot_frame is not None:
+                    idle_full_snap = save_snapshot(snapshot_frame)
+                if snapshot_frame is not None and person_bbox is not None:
+                    x1, y1, x2, y2 = person_bbox
+                    idle_crop_snap = save_person_crop(
+                        snapshot_frame, x1, y1, x2, y2,
+                        f"idle_{self._person_id}"
+                    )
                 ev = insert_fatigue_event(
                     person_id        = self._person_id,
                     camera_id        = CAMERA_ID,
@@ -211,8 +221,8 @@ class FatigueEngine:
                     reclined_ratio   = analysis.reclined_ratio,
                     inactive_seconds = inactive_secs,
                     confidence       = 0.6,
-                    snapshot         = None,
-                    crop_snapshot    = None,
+                    snapshot         = idle_full_snap,
+                    crop_snapshot    = idle_crop_snap,
                     summary          = None,
                 )
                 if ev:

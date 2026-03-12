@@ -26,10 +26,21 @@ const TYPE_CFG = {
     icon: "😪",
     border: "#ff8c0044",
   },
+  idle: {
+    accent: "#2196f3",
+    label: "IDLE",
+    icon: "💤",
+    border: "#2196f344",
+  },
 };
 
 function TypeBadge({ type }) {
-  const cfg = TYPE_CFG[type] ?? TYPE_CFG.sleeping;
+  const cfg = TYPE_CFG[type] ?? {
+    accent: "#888",
+    label: type?.toUpperCase() ?? "UNKNOWN",
+    icon: "❓",
+    border: "#88888844",
+  };
   return (
     <span
       style={{
@@ -382,6 +393,7 @@ export default function Events() {
     filter === "all" ? events : events.filter((e) => e.fatigue_type === filter);
 
   const nSleep = events.filter((e) => e.fatigue_type === "sleeping").length;
+  const nIdle = events.filter((e) => e.fatigue_type === "idle").length;
   const nDrowsy = events.filter((e) => e.fatigue_type === "drowsy").length;
 
   return (
@@ -412,6 +424,7 @@ export default function Events() {
         {[
           { key: "all", label: `ALL  ${events.length}` },
           { key: "sleeping", label: `😴 SLEEPING  ${nSleep}` },
+          { key: "idle", label: `💤 IDLE  ${nIdle}` },
           { key: "drowsy", label: `😪 DROWSY  ${nDrowsy}` },
         ].map((tab) => (
           <button
