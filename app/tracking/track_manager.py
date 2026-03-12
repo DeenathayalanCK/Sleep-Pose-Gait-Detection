@@ -203,6 +203,24 @@ class TrackManager:
         return {tid: self._states[tid] for tid in active_ids if tid in self._states}
 
 
+    def reset(self) -> int:
+        """
+        Clear all tracked person states and ReID gallery.
+        Returns number of identities cleared.
+        Called via POST /reset-identities from the frontend.
+        """
+        count = len(self._states)
+        for ps in self._states.values():
+            try:
+                ps.detector.close()
+            except Exception:
+                pass
+        self._states.clear()
+        self._reid._gallery.clear()
+        logger.info(f"TrackManager reset — cleared {count} identities")
+        return count
+
+
 def _remap_landmarks(analysis, person, crop_shape, frame_h, frame_w):
     if analysis.pose_landmarks is None:
         return analysis

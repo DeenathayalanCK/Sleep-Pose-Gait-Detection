@@ -1,3 +1,11 @@
+# docker-compose.yml — Linux native deployment
+# Works on: Ubuntu, Debian, CentOS, Rocky Linux, any Docker-on-Linux host
+# No WSL2, no Windows subsystem needed
+#
+# Deploy:
+#   sudo docker compose up --build -d
+#   sudo docker compose logs -f fatigue-ai
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -13,31 +21,40 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    ports:
-      - "5432:5432" # expose for local inspection — remove in production
+    # Remove port exposure in production — only fatigue-ai needs postgres
+    # ports:
+    #   - "5432:5432"
 
   fatigue-ai:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
-      # PostgreSQL — overrides SQLite fallback in db.py
       DATABASE_URL: postgresql://fatigue:fatigue_secret@postgres:5432/fatigue_db
+      # Linux: disable GPU explicitly (no NVIDIA assumed)
+      MEDIAPIPE_DISABLE_GPU: "1"
+      OMP_NUM_THREADS: "2"
     volumes:
-      - ./data:/app/data # video source + snapshots
-      - ./.env:/app/.env # camera config, thresholds
+      # All data persisted on host — survives container rebuilds
+      - ./data:/app/data
+      - ./.env:/app/.env
     depends_on:
       postgres:
-        condition: service_healthy # wait for Postgres to be ready
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 30s
+    # Linux: set user to avoid permission issues with mounted volumes
+    # Comment out if you hit permission errors — depends on your Docker setup
+    # user: "1000:1000"
 
 volumes:
-  postgres_data: # persists DB across container restarts
+  postgres_data:

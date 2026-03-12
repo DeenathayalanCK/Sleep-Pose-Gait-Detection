@@ -74,3 +74,25 @@ async def video_stream(request: Request):
             "X-Accel-Buffering": "no",   # tells nginx not to buffer this stream
         },
     )
+
+@router.post("/reset-identities")
+def reset_identities():
+    """
+    Clear all tracked persons and ReID gallery.
+    Use before deploying on a new set of people so old identity embeddings
+    don't incorrectly match new faces.
+    Does NOT delete database events or sessions — only clears in-memory state.
+    """
+    from app.main import get_track_manager
+    try:
+        tm = get_track_manager()
+        if tm is None:
+            return {"status": "error", "message": "Track manager not ready"}
+        count = tm.reset()
+        return {
+            "status": "ok",
+            "message": f"Cleared {count} tracked identities. Fresh start.",
+            "cleared": count,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

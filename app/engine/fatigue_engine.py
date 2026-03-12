@@ -3,7 +3,7 @@ import datetime
 import logging
 from threading import Thread
 
-from app.config import ALERT_COOLDOWN_SECONDS, CAMERA_ID
+from app.config import ALERT_COOLDOWN_SECONDS, CAMERA_ID, SLEEP_SECONDS, IDLE_SECONDS, IDLE_COOLDOWN_SECONDS
 from app.detection.sleep_pose_detector import SleepAnalysis
 from app.detection.risk_scorer import compute_risk
 
@@ -75,6 +75,11 @@ class FatigueEngine:
         self._episode_state:     str   | None = None   # "sleeping" | "drowsy"
         self._last_alert_at:     float | None = None
         self._current_event_id:  int   | None = None
+        # Idle (sitting still but awake) tracking
+        self._idle_start:        float | None = None
+        self._idle_start_dt:     str   | None = None
+        self._idle_event_id:     int   | None = None
+        self._last_idle_alert:   float | None = None
 
     def update(self, analysis: SleepAnalysis,
                snapshot_frame=None,
@@ -170,6 +175,73 @@ class FatigueEngine:
             self._episode_start_dt = None
             self._episode_state    = None
             self._current_event_id = None
+
+        # ── Idle tracking (awake but sitting still) ───────────────────
+        # Only track idle when person is genuinely awake and inactive
+        inactive_secs = analysis.inactive_seconds
+        is_idle = (
+            state not in ("sleeping", "drowsy")
+            and inactive_secs >= IDLE_SECONDS          # configurable via IDLE_SECONDS in .env
+        )
+
+        if is_idle:
+            if self._idle_start is None:
+                self._idle_start    = now
+                self._idle_start_dt = now_dt
+
+            idle_duration = now - self._idle_start
+            idle_cooldown = (
+                self._last_idle_alert is not None
+                and (now - self._last_idle_alert) < IDLE_COOLDOWN_SECONDS
+            )
+
+            if not idle_cooldown and idle_duration >= IDLE_SECONDS:
+                self._last_idle_alert = now
+                cause = (f"Sitting idle for {inactive_secs:.0f}s — "
+                         f"no movement detected (awake but inactive)")
+                # Save snapshot for idle events same as sleeping/drowsy
+                idle_full_snap = idle_crop_snap = None
+                if snapshot_frame is not None:
+                    idle_full_snap = save_snapshot(snapshot_frame)
+                if snapshot_frame is not None and person_bbox is not None:
+                    x1, y1, x2, y2 = person_bbox
+                    idle_crop_snap = save_person_crop(
+                        snapshot_frame, x1, y1, x2, y2,
+                        f"idle_{self._person_id}"
+                    )
+                ev = insert_fatigue_event(
+                    person_id        = self._person_id,
+                    camera_id        = CAMERA_ID,
+                    fatigue_type     = "idle",
+                    fatigue_cause    = cause,
+                    started_at       = self._idle_start_dt,
+                    ended_at         = None,
+                    duration         = round(idle_duration, 1),
+                    trigger          = "inactivity",
+                    reclined_ratio   = analysis.reclined_ratio,
+                    inactive_seconds = inactive_secs,
+                    confidence       = 0.6,
+                    snapshot         = idle_full_snap,
+                    crop_snapshot    = idle_crop_snap,
+                    summary          = None,
+                )
+                if ev:
+                    self._idle_event_id = ev.id
+                    logger.info(
+                        f"[P{self._person_id}] IDLE EVENT #{ev.id} "                        f"inactive={inactive_secs:.0f}s"
+                    )
+        else:
+            # Close idle episode when person becomes active again
+            if self._idle_start is not None and self._idle_event_id is not None:
+                total_idle = now - self._idle_start
+                Thread(
+                    target=update_event_end,
+                    args=(self._idle_event_id, now_dt, round(total_idle, 1), None),
+                    daemon=True,
+                ).start()
+            self._idle_start    = None
+            self._idle_start_dt = None
+            self._idle_event_id = None
 
         return False, 0.0
 
