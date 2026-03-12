@@ -130,3 +130,8 @@ ZSCORE_WARMUP_FRAMES = _int("ZSCORE_WARMUP_FRAMES",  "150")
 ZSCORE_MIN_STD      = _float("ZSCORE_MIN_STD",       "2.0")
 # EMA alpha for slow baseline drift (0.02 = very slow adaptation)
 ZSCORE_EMA_ALPHA    = _float("ZSCORE_EMA_ALPHA",     "0.02")
+# ── Idle detection (awake but sitting still) ──────────────────────────────────
+# Seconds of inactivity before a sitting-idle event is recorded
+IDLE_SECONDS         = _float("IDLE_SECONDS",          "120.0")
+# Cooldown between idle alerts for the same person (seconds)
+IDLE_COOLDOWN_SECONDS = _float("IDLE_COOLDOWN_SECONDS", "300.0")

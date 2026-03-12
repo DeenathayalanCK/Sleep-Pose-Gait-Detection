@@ -227,8 +227,11 @@ class SleepPoseDetector:
         wrist_active = (wrist_act is not None and wrist_act > _WRIST_ACTIVE_MIN)
 
         # ── EAR / PERCLOS signal integration ─────────────────────────
-        sleep_by_ear  = ear_result.sleep_by_ear   if ear_result else False
-        drowsy_by_ear = ear_result.drowsy_by_ear  if ear_result else False
+        # CRITICAL: only trust PERCLOS when face is actually detected this frame.
+        # Without face_found check, stale buffer values fire on non-face crops.
+        _ear_valid    = ear_result is not None and ear_result.face_found
+        sleep_by_ear  = ear_result.sleep_by_ear  if _ear_valid else False
+        drowsy_by_ear = ear_result.drowsy_by_ear if _ear_valid else False
 
         # ── Z-score baseline: update or compute ───────────────────────
         # Build signals dict for baseline (use raw unsmoothed values for
@@ -283,7 +286,7 @@ class SleepPoseDetector:
         _wrist_idle = (wrist_act is None or wrist_act <= _WRIST_ACTIVE_MIN)
         _corroborated = (
             somewhat_reclined or                          # body leaning back
-            (ear_result and ear_result.perclos >= 0.10)  # any eye closure
+            (_ear_valid and ear_result.perclos >= 0.10)  # any eye closure — face must be detected
         )
         sleep_by_head_drop  = (
             head_drop is not None

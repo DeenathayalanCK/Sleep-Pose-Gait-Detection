@@ -24,6 +24,12 @@ setup_logger()
 logger = logging.getLogger(__name__)
 
 current_persons: dict = {}
+_track_manager = None
+
+
+def get_track_manager():
+    """Called by reset-identities endpoint to access live TrackManager."""
+    return _track_manager
 
 
 def monitor():
@@ -33,6 +39,8 @@ def monitor():
     video      = VideoReader()          # now runs its own background capture thread
     tracker    = PersonTracker()
     track_mgr  = TrackManager()
+    global _track_manager
+    _track_manager = track_mgr
 
     # ── FPS tracking for diagnostics ─────────────────────────────────
     fps_counter = 0

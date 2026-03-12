@@ -5,8 +5,9 @@ import PersonList from "./components/PersonList";
 import Events from "./components/Events";
 import Calibration from "./components/Calibration";
 import Evaluate from "./components/Evaluate";
+import Health from "./components/Health";
 
-const TABS = ["Live", "Records", "Persons", "Calibrate", "Evaluate"];
+const TABS = ["Live", "Records", "Persons", "Calibrate", "Evaluate", "Health"];
 
 const TAB_ACCENT = {
   Evaluate: "#00bcd4",
@@ -73,7 +74,9 @@ export default function App() {
         </div>
       )}
 
-      {["Records", "Persons", "Calibrate", "Evaluate"].includes(tab) && (
+      {["Records", "Persons", "Calibrate", "Evaluate", "Health"].includes(
+        tab,
+      ) && (
         <div
           style={{
             background: "#0a0a0a",
@@ -86,6 +89,7 @@ export default function App() {
           {tab === "Persons" && <PersonList />}
           {tab === "Calibrate" && <Calibration />}
           {tab === "Evaluate" && <Evaluate />}
+          {tab === "Health" && <Health />}
         </div>
       )}
     </div>

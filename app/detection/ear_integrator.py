@@ -119,6 +119,16 @@ class EARIntegrator:
         self._no_face_frames = 0
         face_lms = result.multi_face_landmarks[0]
 
+        # Sanity check: verify key eye landmarks have reasonable visibility.
+        # Rejects false detections on clothing/backgrounds where FaceMesh
+        # returns landmarks but they're all clustered (not a real face).
+        eye_lm_indices = _LEFT_EYE + _RIGHT_EYE
+        visibilities = [face_lms.landmark[i].visibility for i in eye_lm_indices
+                        if hasattr(face_lms.landmark[i], 'visibility')]
+        if visibilities and (sum(visibilities) / len(visibilities)) < 0.3:
+            self._no_face_frames += 1
+            return EARResult(face_found=False)
+
         left_pts, right_pts = _extract_eye_pts(face_lms, w, h)
         left_ear  = _compute_ear(left_pts)
         right_ear = _compute_ear(right_pts)

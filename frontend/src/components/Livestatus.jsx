@@ -54,7 +54,7 @@ function ZBar({ label, z }) {
           display: "flex",
           justifyContent: "space-between",
           fontSize: 9,
-          color: "#444",
+          color: "#bbb",
           marginBottom: 2,
         }}
       >
@@ -342,7 +342,7 @@ function PersonCard({ p }) {
           display: "flex",
           gap: 16,
           fontSize: 10,
-          color: "#444",
+          color: "#bbb",
           fontFamily: "monospace",
         }}
       >

@@ -67,7 +67,7 @@ function CauseBanner({ cause }) {
       }}
     >
       <span
-        style={{ color: "#555", marginRight: 8, fontSize: 9, letterSpacing: 2 }}
+        style={{ color: "#ccc", marginRight: 8, fontSize: 9, letterSpacing: 2 }}
       >
         WHY
       </span>
@@ -91,7 +91,7 @@ function Badge({ label, value, accent }) {
         style={{
           fontSize: 9,
           letterSpacing: 2,
-          color: "#444",
+          color: "#bbb",
           textTransform: "uppercase",
           marginBottom: 2,
         }}
@@ -217,7 +217,7 @@ function EventCard({ e }) {
                 alignItems: "center",
                 justifyContent: "center",
                 fontSize: 9,
-                color: "#555",
+                color: "#ccc",
                 letterSpacing: 1,
               }}
             >
@@ -252,7 +252,7 @@ function EventCard({ e }) {
                 <div
                   style={{
                     fontSize: 10,
-                    color: "#444",
+                    color: "#bbb",
                     textAlign: "center",
                     marginTop: 6,
                     fontFamily: "monospace",
@@ -291,7 +291,7 @@ function EventCard({ e }) {
         >
           <TypeBadge type={e.fatigue_type} />
           <span
-            style={{ fontSize: 10, color: "#444", fontFamily: "monospace" }}
+            style={{ fontSize: 10, color: "#bbb", fontFamily: "monospace" }}
           >
             {fmt(e.started_at)} → {e.ended_at ? fmt(e.ended_at) : "ongoing…"}
           </span>
@@ -334,14 +334,14 @@ function EventCard({ e }) {
             value={`${((e.confidence || 0) * 100).toFixed(0)}%`}
             accent="#ffaa44"
           />
-          <Badge label="Trigger" value={e.trigger || "—"} accent="#666" />
+          <Badge label="Trigger" value={e.trigger || "—"} accent="#aaa" />
         </div>
 
         {/* LLM summary */}
         <div
           style={{
             fontSize: 11,
-            color: "#555",
+            color: "#ccc",
             lineHeight: 1.7,
             fontFamily: "monospace",
             borderTop: "1px solid #1a1a1a",
@@ -400,7 +400,7 @@ export default function Events() {
           style={{
             fontSize: 11,
             letterSpacing: 4,
-            color: "#555",
+            color: "#ccc",
             textTransform: "uppercase",
             margin: 0,
           }}
@@ -422,7 +422,7 @@ export default function Events() {
               border: `1px solid ${filter === tab.key ? "#444" : "#222"}`,
               borderRadius: 6,
               padding: "4px 12px",
-              color: filter === tab.key ? "#ddd" : "#444",
+              color: filter === tab.key ? "#fff" : "#aaa",
               fontSize: 10,
               fontFamily: "monospace",
               letterSpacing: 1,
